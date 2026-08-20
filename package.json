@@ -1,10 +1,12 @@
 {
   "name": "devbox-panel",
   "version": "1.0.0",
-  "private": true,
+  "private": false,
   "description": "Web control panel for a dev/showcase server: run make targets with live output, manage Docker containers, PM2 apps and nginx.",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
@@ -18,5 +20,16 @@
     "@xterm/xterm": "^5.5.0",
     "express": "^4.21.2",
     "ws": "^8.18.0"
-  }
+  },
+  "license": "MIT",
+  "keywords": [
+    "pm2",
+    "docker",
+    "nginx",
+    "makefile",
+    "deployment",
+    "dashboard",
+    "self-hosted",
+    "devops"
+  ]
 }

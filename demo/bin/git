@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Fake git for the demo fixtures — returns canned, invented repository state.
+set -uo pipefail
+project=""
+for ((i=1; i<=$#; i++)); do
+  if [ "${!i}" = "-C" ]; then n=$((i+1)); project=$(basename "${!n}"); fi
+done
+
+case "$project" in
+  storefront)      branch=main;   hash=4f2a9c1; subject="feat: page-shaped loading skeletons for every route"; when="14 minutes ago"; dirty=0; counts="0	0" ;;
+  api-gateway)     branch=main;   hash=b71d0ae; subject="fix: retry idempotent upstream calls on 502"; when="2 days ago"; dirty=2; counts="0	3" ;;
+  admin-console)   branch=main;   hash=9c34f80; subject="chore: bump the shared design tokens package"; when="6 hours ago"; dirty=0; counts="1	0" ;;
+  marketing-site)  branch=main;   hash=e05b127; subject="content: rewrite the pricing copy"; when="3 weeks ago"; dirty=0; counts="0	0" ;;
+  *)               branch=main;   hash=0000000; subject="initial commit"; when="1 hour ago"; dirty=0; counts="0	0" ;;
+esac
+
+args="$*"
+case "$args" in
+  *"rev-parse --abbrev-ref HEAD"*) echo "$branch" ;;
+  *"log -1"*)                      printf '%s\x1f%s\x1f%s\x1f%s\n' "$hash" "Demo User" "$when" "$subject" ;;
+  *"status --porcelain"*)          for ((d=0; d<dirty; d++)); do echo " M src/file$d.ts"; done ;;
+  *"rev-list --left-right"*)       printf '%s\n' "$counts" ;;
+  *"fetch"*)                       echo "Fetching origin"; sleep 1; echo "already up to date" ;;
+  *)                               echo "git: demo stub" ;;
+esac

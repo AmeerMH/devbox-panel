@@ -11,7 +11,10 @@ export function clientIp(req, behindProxy) {
   return req.socket?.remoteAddress || 'unknown'
 }
 
+export const DEMO_SESSION = { sub: 'demo', csrf: 'demo', exp: Number.MAX_SAFE_INTEGER, demo: true }
+
 export function sessionFromRequest(req, cfg) {
+  if (cfg.demo) return DEMO_SESSION
   const cookies = parseCookies(req.headers.cookie || '')
   const token = cookies[COOKIE_NAME]
   if (!token) return null
@@ -64,6 +67,10 @@ export function createApiRouter(ctx) {
   router.use((req, res, next) => {
     const session = sessionFromRequest(req, cfg)
     if (!session) return res.status(401).json({ error: 'Not signed in' })
+    if (cfg.demo) {
+      req.session = session
+      return next()
+    }
     // Double-submit CSRF: the token lives in the signed session, and the browser
     // must echo it in a header — which a cross-site form post cannot do.
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.get('x-panel-csrf') !== session.csrf) {
@@ -74,7 +81,7 @@ export function createApiRouter(ctx) {
   })
 
   router.get('/me', (req, res) => {
-    res.json({ user: req.session.sub, csrf: req.session.csrf, expiresAt: req.session.exp })
+    res.json({ user: req.session.sub, csrf: req.session.csrf, expiresAt: req.session.exp, demo: !!cfg.demo })
   })
 
   /* --------------------------------------------------------------- health */

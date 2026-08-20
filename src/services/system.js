@@ -10,6 +10,15 @@ export class SystemService {
   }
 
   async snapshot() {
+    // Demo mode reports invented host facts for the same reason the rest of the
+    // demo is invented: the screenshots in the README must not show a real box.
+    if (this.cfg.demo && this.cfg.demoSystem) {
+      return {
+        ...this.cfg.demoSystem,
+        panel: { ...this.cfg.demoSystem.panel, version: this.version, uptimeSec: Math.round(process.uptime()) },
+      }
+    }
+
     const [disk, ports] = await Promise.all([this.disks(), this.ports()])
     const mem = await this.memory()
     return {

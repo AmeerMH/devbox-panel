@@ -87,6 +87,7 @@ const server = http.createServer(app)
 attachWebsocket({ server, cfg, jobs, pollers, streams })
 
 server.listen(cfg.port, cfg.host, () => {
+  if (cfg.demo) console.log('\n*** DEMO MODE — authentication disabled, loopback only, fake data ***\n')
   console.log(`devbox-panel ${pkg.version} listening on http://${cfg.host}:${cfg.port}`)
   console.log(`  config : ${cfg.configPath}`)
   console.log(`  data   : ${cfg.dataDir}`)

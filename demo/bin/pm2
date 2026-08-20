@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Fake pm2 for the demo — invented processes, no daemon involved.
+set -uo pipefail
+now=$(date +%s000)
+case "${1:-}" in
+  -v|--version) echo "7.0.1" ;;
+  jlist)
+    cat <<JSON
+[
+ {"pm_id":0,"name":"storefront","pid":18420,"monit":{"cpu":0.4,"memory":286331153},"pm2_env":{"status":"online","exec_mode":"cluster_mode","instances":2,"pm_uptime":$((now - 691200000)),"restart_time":3,"unstable_restarts":0,"pm_cwd":"/srv/apps/storefront","PORT":"3000","node_version":"22.14.0","username":"deploy","pm_out_log_path":"/dev/null","pm_err_log_path":"/dev/null"}},
+ {"pm_id":1,"name":"storefront","pid":18421,"monit":{"cpu":0.3,"memory":274877906},"pm2_env":{"status":"online","exec_mode":"cluster_mode","instances":2,"pm_uptime":$((now - 691200000)),"restart_time":3,"unstable_restarts":0,"pm_cwd":"/srv/apps/storefront","PORT":"3000","node_version":"22.14.0","username":"deploy","pm_out_log_path":"/dev/null","pm_err_log_path":"/dev/null"}},
+ {"pm_id":2,"name":"api-gateway","pid":18455,"monit":{"cpu":0.9,"memory":123731968},"pm2_env":{"status":"online","exec_mode":"fork_mode","instances":1,"pm_uptime":$((now - 1382400000)),"restart_time":0,"unstable_restarts":0,"pm_cwd":"/srv/apps/api-gateway","PORT":"4000","node_version":"22.14.0","username":"deploy","pm_out_log_path":"/dev/null","pm_err_log_path":"/dev/null"}},
+ {"pm_id":3,"name":"admin-console","pid":18470,"monit":{"cpu":0.1,"memory":78643200},"pm2_env":{"status":"online","exec_mode":"fork_mode","instances":1,"pm_uptime":$((now - 172800000)),"restart_time":1,"unstable_restarts":0,"pm_cwd":"/srv/apps/admin-console","PORT":"5000","node_version":"22.14.0","username":"deploy","pm_out_log_path":"/dev/null","pm_err_log_path":"/dev/null"}},
+ {"pm_id":4,"name":"marketing-site","pid":0,"monit":{"cpu":0,"memory":0},"pm2_env":{"status":"stopped","exec_mode":"fork_mode","instances":1,"pm_uptime":$now,"restart_time":11,"unstable_restarts":2,"pm_cwd":"/srv/apps/marketing-site","PORT":"6000","node_version":"22.14.0","username":"deploy","pm_out_log_path":"/dev/null","pm_err_log_path":"/dev/null"}}
+]
+JSON
+    ;;
+  logs)
+    name=${2:-app}
+    echo "$name  GET /  200 in 41ms"
+    i=0
+    while true; do
+      i=$((i+1))
+      for path in "/" "/products/42" "/api/cart" "/checkout"; do
+        echo "$name  GET $path 200 in $((20 + i % 90))ms"
+      done
+      sleep 2
+    done
+    ;;
+  restart|reload|stop|start|flush) echo "[PM2] applying action ${1} on app [${2:-app}]"; sleep 1; echo "[PM2] done" ;;
+  describe) echo "describing ${2:-app} (demo stub)" ;;
+  *) echo "pm2: demo stub" ;;
+esac

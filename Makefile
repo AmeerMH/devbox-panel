@@ -5,7 +5,7 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 PM2 := $(shell command -v pm2 2>/dev/null || echo $$HOME/.npm-global/bin/pm2)
 
-.PHONY: help install dev start test lint deploy self-update logs status hash-password gen-secret install-server
+.PHONY: help install dev demo start test lint deploy self-update logs status hash-password gen-secret install-server screenshots
 
 help: ## Show this help
 	@echo "devbox-panel — make targets:"
@@ -17,6 +17,12 @@ install: ## Install dependencies (dev machine)
 
 dev: ## Run locally with auto-restart on file changes
 	npm run dev
+
+demo: ## Run against invented projects/containers/processes — no login, loopback only
+	@bash demo/run.sh
+
+screenshots: ## Regenerate docs/screenshots from the demo (needs Chrome or Edge)
+	@node demo/screenshot.mjs
 
 start: ## Run the server in the foreground
 	npm start

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Fake nginx helper for the demo — same six verbs as the real one, but it reads
+# invented vhosts from demo/nginx and never signals a real nginx.
+set -uo pipefail
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+VHOST_DIR="$HERE/nginx/vhosts"
+LOG_DIR="$HERE/nginx/logs"
+
+valid_name() { [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]] && [[ "$1" != *".."* ]]; }
+
+json_files() {
+  local dir="$1" ext="$2" first=1 f base size mtime
+  printf '['
+  for f in "$dir"/*"$ext"; do
+    [ -f "$f" ] || continue
+    base=$(basename "$f")
+    size=$(stat -f %z "$f" 2>/dev/null || stat -c %s "$f" 2>/dev/null || echo 0)
+    mtime=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+    [ $first -eq 1 ] || printf ','
+    first=0
+    printf '{"file":"%s","size":%s,"mtime":%s}' "$base" "$size" "$mtime"
+  done
+  printf ']\n'
+}
+
+case "${1:-}" in
+  status) printf '{"running":true,"pid":1071,"version":"nginx version: nginx/1.24.0","vhostDir":"%s","logDir":"%s"}\n' "$VHOST_DIR" "$LOG_DIR" ;;
+  list)   json_files "$VHOST_DIR" .conf ;;
+  show)   valid_name "${2:-}" && cat "$VHOST_DIR/$2" ;;
+  test)   echo "nginx: the configuration file /etc/nginx/nginx.conf syntax is ok"; echo "nginx: configuration file /etc/nginx/nginx.conf test is successful" ;;
+  reload) echo "nginx: configuration file /etc/nginx/nginx.conf test is successful"; echo "reloaded" ;;
+  logs)   json_files "$LOG_DIR" .log ;;
+  tail)   valid_name "${2:-}" && tail -n "${3:-200}" "$LOG_DIR/$2" ;;
+  tail-follow)
+    valid_name "${2:-}" || exit 2
+    tail -n "${3:-200}" "$LOG_DIR/$2"
+    i=0
+    while true; do
+      i=$((i+1))
+      echo "203.0.113.$((10 + i % 200)) - - [20/Aug/2026:21:4$((i % 9)):$((i % 60)) +0000] \"GET /products/$((100 + i)) HTTP/2.0\" 200 $((8000 + i)) \"-\" \"Mozilla/5.0\""
+      sleep 2
+    done
+    ;;
+  *) echo "usage: nginx-helper {status|list|show|test|reload|logs|tail|tail-follow}" >&2; exit 2 ;;
+esac

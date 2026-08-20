@@ -54,6 +54,10 @@ export function loadConfig() {
   cfg.configPath = configPath
   cfg.dataDir = path.resolve(ROOT_DIR, cfg.dataDir)
   cfg.roots = (cfg.roots || []).filter((r) => r && r.path && r.enabled !== false)
+  // Demo mode powers `make demo` and the README screenshots: fake docker/pm2/nginx
+  // CLIs, fake projects, and no login. It is loopback-only by construction (see
+  // assertUsable) so it can never become an unauthenticated panel on a real host.
+  cfg.demo = process.env.PANEL_DEMO === '1'
   cfg.behindProxy = process.env.PANEL_BEHIND_PROXY === '1'
   cfg.sessionHours = Number(process.env.PANEL_SESSION_HOURS || 12)
   cfg.passwordHash = process.env.PANEL_PASSWORD_HASH || ''
@@ -65,8 +69,17 @@ export function loadConfig() {
 /** Fatal misconfiguration checks — refuse to boot rather than serve something unauthenticated. */
 export function assertUsable(cfg) {
   const problems = []
+  if (!cfg.roots.length) problems.push('No project roots configured')
+
+  if (cfg.demo) {
+    // The only thing demo mode may never do is listen anywhere but loopback.
+    if (!['127.0.0.1', 'localhost', '::1'].includes(cfg.host)) {
+      problems.push(`PANEL_DEMO=1 skips authentication, so it refuses to bind ${cfg.host} — use 127.0.0.1`)
+    }
+    return problems
+  }
+
   if (!cfg.passwordHash) problems.push('PANEL_PASSWORD_HASH is empty — run `npm run hash-password` and put it in .env')
   if (!cfg.sessionSecret || cfg.sessionSecret.length < 16) problems.push('PANEL_SESSION_SECRET is missing or too short — run `npm run gen-secret`')
-  if (!cfg.roots.length) problems.push('No project roots configured')
   return problems
 }
