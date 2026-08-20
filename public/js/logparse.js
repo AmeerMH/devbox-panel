@@ -21,6 +21,34 @@ const PM2_HEADER = /last \d+ lines:$/
 const PINO_LEVELS = { 10: 'trace', 20: 'debug', 30: 'info', 40: 'warn', 50: 'error', 60: 'fatal' }
 export const LEVELS = ['error', 'warn', 'info', 'debug', 'trace', 'fatal', 'other']
 
+/**
+ * True when a line starts a JSON object that has not been closed yet — a logger
+ * whose message contains a raw newline (a stack trace, a SQL statement) emits an
+ * object spanning several physical lines, and parsing each line alone produces
+ * garbage rows starting mid-string.
+ */
+export function looksIncompleteJson(text) {
+  const trimmed = text.trimStart()
+  if (!trimmed.startsWith('{')) return false
+  try {
+    JSON.parse(trimmed)
+    return false
+  } catch {
+    let depth = 0
+    let inString = false
+    let escaped = false
+    for (const ch of trimmed) {
+      if (escaped) { escaped = false; continue }
+      if (ch === '\\') { escaped = true; continue }
+      if (ch === '"') { inString = !inString; continue }
+      if (inString) continue
+      if (ch === '{') depth += 1
+      else if (ch === '}') depth -= 1
+    }
+    return depth > 0
+  }
+}
+
 /** Lines that open a block: everything after them belongs to them until a new entry starts. */
 const OPENERS = [
   /^prisma:(error|warn)/i,
@@ -29,6 +57,14 @@ const OPENERS = [
   /^(Unhandled|Uncaught)/i,
   /^[⨯✖✗×]\s/,
 ]
+
+function tryJson(text) {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
 
 function levelName(value) {
   if (typeof value === 'number') return PINO_LEVELS[value] || 'other'
@@ -126,8 +162,11 @@ export function parseLine(rawLine) {
   }
 
   if (trimmed.startsWith('{')) {
-    try {
-      const json = JSON.parse(trimmed)
+    // Two attempts: as-is (covers pretty-printed objects), then with newlines
+    // escaped (covers a message field that embedded a raw stack trace — valid
+    // JSON forbids that, but loggers emit it anyway).
+    const json = tryJson(trimmed) ?? tryJson(trimmed.replace(/\r?\n/g, '\\n'))
+    if (json && typeof json === 'object') {
       const { level, time, msg, message, kind, ...rest } = json
       entry.level = levelName(level)
       entry.time = toTime(time) ?? entry.time
@@ -140,9 +179,8 @@ export function parseLine(rawLine) {
         : (derived.length <= 32 && !derived.includes('\n') ? derived : 'json')
       entry.fields = rest
       return entry
-    } catch {
-      // Not valid JSON after all — fall through and keep it as text.
     }
+    // Not JSON after all — fall through and keep it as text.
   }
 
   const nginxError = NGINX_ERROR.exec(trimmed)
@@ -212,6 +250,11 @@ export class LogStream {
     // happened to arrive in the middle of it.
     this.openByInstance = new Map()
     this.lastByInstance = new Map()
+    this.pendingJson = new Map()
+    // pm2 writes a multi-line record with ONE prefix on its first line, so the
+    // lines that follow have to inherit the instance from the line above them.
+    this.sawPrefix = false
+    this.lastKey = 'main'
   }
 
   push(chunk, now = Date.now()) {
@@ -221,8 +264,40 @@ export class LogStream {
     this.partial = lines.pop() ?? ''
 
     for (const line of lines) {
-      const { instance, rest } = splitPrefix(line)
-      const key = instance === null ? 'main' : instance
+      const { instance, source, rest } = splitPrefix(line)
+      if (instance !== null) {
+        this.sawPrefix = true
+        this.lastKey = instance
+      }
+      const key = instance !== null ? instance : (this.sawPrefix ? this.lastKey : 'main')
+
+      // Continue collecting a JSON object that spans physical lines.
+      const pending = this.pendingJson.get(key)
+      if (pending) {
+        pending.text += `\n${rest}`
+        pending.raw += `\n${line}`
+        pending.lines += 1
+        if (!looksIncompleteJson(pending.text) || pending.lines > 60 || pending.text.length > 64_000) {
+          this.pendingJson.delete(key)
+          const entry = parseLine(pending.text)
+          entry.instance = pending.instance
+          entry.source = pending.source
+          entry.raw = pending.raw
+          if (entry.time === null) { entry.time = now; entry.timeSource = 'received' }
+          entry.seq = this.seq++
+          this.entries.push(entry)
+          added.push(entry)
+          this.lastByInstance.set(key, entry)
+          if (entry.open) this.openByInstance.set(key, entry)
+          else this.openByInstance.delete(key)
+        }
+        continue
+      }
+
+      if (looksIncompleteJson(rest)) {
+        this.pendingJson.set(key, { text: rest, raw: line, instance, source, lines: 1 })
+        continue
+      }
       // An indented line is a continuation by universal convention (stack frames,
       // wrapped SQL, YAML) — even when the line above it did not announce a block.
       const indented = /^\s+\S/.test(rest)

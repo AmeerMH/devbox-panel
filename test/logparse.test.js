@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { LogStream, parseLine, isEntryStart, filterEntries, facets } from '../public/js/logparse.js'
+import { LogStream, parseLine, isEntryStart, filterEntries, facets, looksIncompleteJson } from '../public/js/logparse.js'
 
 // Verbatim from a real pm2 stream: pino JSON, a multi-line Prisma error, plain text.
 const SAMPLE = `{"level":"info","time":"2026-08-20T20:14:17.581Z","msg":"web-vital","kind":"web-vital","name":"TTFB","value":642.3999999910593,"rating":"good","url":"/offers"}
@@ -230,4 +230,39 @@ test('a paragraph-length message never becomes a filter chip', () => {
 
   const kinded = parseLine(JSON.stringify({ level: 'info', msg: long, kind: 'web-vital' }))
   assert.equal(kinded.kind, 'web-vital')
+})
+
+test('a JSON log line containing raw newlines is reassembled, not split', () => {
+  const stream = new LogStream()
+  // pino-style line whose message embeds a stack trace with real newlines.
+  stream.push([
+    '12|zad-dev | {"level":"error","kind":"error","msg":"Failed to load chunk',
+    'from module 964893',
+    '    at loadChunk (/srv/app/.next/server/chunks/3fas.js:1:120)","url":"/checkout"}',
+    '12|zad-dev | {"level":"info","kind":"http","msg":"request","url":"/orders"}',
+    '',
+  ].join('\n'))
+
+  assert.equal(stream.entries.length, 2, 'the split object is one entry')
+  const [error, request] = stream.entries
+  assert.equal(error.level, 'error')
+  assert.equal(error.kind, 'error')
+  assert.equal(error.instance, 12)
+  assert.match(error.msg, /Failed to load chunk[\s\S]*loadChunk/)
+  assert.equal(error.fields.url, '/checkout')
+  assert.equal(request.kind, 'http')
+})
+
+test('an unterminated JSON line does not swallow the rest of the stream forever', () => {
+  const stream = new LogStream()
+  stream.push('{"level":"error","msg":"never closed\n')
+  for (let i = 0; i < 70; i += 1) stream.push(`still going ${i}\n`)
+  assert.ok(stream.entries.length >= 1, 'it gives up and emits what it has')
+})
+
+test('incomplete-json detection ignores braces inside strings', () => {
+  assert.equal(looksIncompleteJson('{"msg":"a { brace in a string"}'), false)
+  assert.equal(looksIncompleteJson('{"msg":"opened'), true)
+  assert.equal(looksIncompleteJson('plain text'), false)
+  assert.equal(looksIncompleteJson('{"msg":"escaped quote \\\\" still open'), true)
 })
