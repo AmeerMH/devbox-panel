@@ -11,8 +11,8 @@ map $host $dev_upstream {
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl;
-    server_name zad-site.store www.zad-site.store *.zad-site.store;
-    ssl_certificate /etc/letsencrypt/live/zad-site.store/fullchain.pem;
+    server_name example.com www.example.com *.example.com;
+    ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
     allow 100.64.0.0/10;
     deny all;
     location / { proxy_pass http://127.0.0.1:3100; }
@@ -21,7 +21,7 @@ server {
 
 test('reads server names, listens and upstreams, inline blocks included', () => {
   const v = parseVhost(VHOST)
-  assert.deepEqual(v.serverNames, ['zad-site.store', 'www.zad-site.store', '*.zad-site.store'])
+  assert.deepEqual(v.serverNames, ['example.com', 'www.example.com', '*.example.com'])
   assert.deepEqual(v.proxyPass, ['http://127.0.0.1:3100'])
   assert.deepEqual(v.upstreamPorts, ['3100'])
   assert.equal(v.listens.length, 2)

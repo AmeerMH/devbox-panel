@@ -13,9 +13,9 @@ function safeId(rootLabel, name) {
 /**
  * Discovers projects under the configured roots and exposes their make targets.
  *
- * A project qualifies if it has a Makefile (runnable) or is a git checkout
- * (still worth showing: Tayf and Portfolio-Builder have no Makefile but do have
- * pm2 apps and a branch worth seeing).
+ * A project qualifies if it has a Makefile (runnable) or is a git checkout — a
+ * checkout without a Makefile is still worth showing, because it has a branch,
+ * a last commit and usually a pm2 app behind it.
  */
 export class ProjectsService {
   constructor(cfg) {

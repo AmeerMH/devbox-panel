@@ -27,8 +27,8 @@
   ],
 
   "projectOverrides": {
-    "Shop-Builder": { "deny": ["db-reset", "db-down"] },
-    "Zad-System": { "deny": ["db-reset"] }
+    "storefront": { "deny": ["db-reset", "db-down"] },
+    "api-gateway": { "deny": ["db-reset"], "danger": ["migrate"] }
   },
 
   "dangerPatterns": [
