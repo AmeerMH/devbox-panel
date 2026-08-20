@@ -8,5 +8,11 @@
 #   install -m 0440 -o root -g root deploy/sudoers.devbox-panel /etc/sudoers.d/devbox-panel
 #   visudo -c
 #
+# The two systemctl lines are only needed when the panel runs as a systemd service
+# and you want `make deploy` / the self-update target to work from the UI. They name
+# the unit explicitly, so they cannot restart anything else.
+#
 # Replace `deploy` if the panel runs as a different user.
 deploy ALL=(root) NOPASSWD: /usr/local/bin/devbox-panel-nginx
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart devbox-panel
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl status devbox-panel

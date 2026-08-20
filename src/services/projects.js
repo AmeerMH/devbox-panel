@@ -171,7 +171,10 @@ export class ProjectsService {
       projectId: project.id,
       target,
       cmd: 'make',
-      args: ['-C', project.path, target],
+      // No `-C`: the child already starts in the project directory, and `-C` puts a
+      // path into $(MAKEFILE_LIST), which breaks the common self-documenting `help`
+      // target (it prints the file name instead of each target's name).
+      args: [target],
       cwd: project.path,
       user: project.user,
       login: !project.user,

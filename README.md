@@ -266,6 +266,7 @@ from `node_modules`, so there is nothing to build or bundle.
 | Logs stall or arrive in bursts | nginx buffering: the vhost needs `proxy_buffering off`, and `proxy_cache off` if a cache is enabled at the http level. |
 | Websocket never connects (page loads, dot is red) | The vhost is missing the `Upgrade`/`Connection` headers, or `$connection_upgrade` is undefined. The template shows the `map` to add. |
 | `make deploy` works over SSH but fails here | The recipe depends on an interactive-shell PATH. The panel prepends `~/.npm-global/bin` and `/usr/local/bin`; anything else belongs in the Makefile. |
+| Reload says `unknown directive "http2"` | nginx < 1.25 takes HTTP/2 on the listen line, not as its own directive. The shipped templates use the compatible form; if you edited yours, use `listen 443 ssl http2;`. The reload is refused rather than applied — the running config is untouched. |
 
 ## Tests
 
