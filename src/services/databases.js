@@ -127,6 +127,11 @@ export class DatabasesService {
       const mainPid = Number(props.MainPID) || 0
       if (!mainPid && props.SubState === 'exited') continue
 
+      // Unprivileged `ss` hides other users' sockets, so a database running as its
+      // own user shows no port. The helper (root) can answer that.
+      let ports = portsByPid.get(mainPid) || []
+      if (!ports.length && mainPid) ports = await this._helperPorts(unit)
+
       out.push({
         id: `service:${unit}`,
         kind: 'service',
@@ -138,10 +143,10 @@ export class DatabasesService {
         state: props.ActiveState === 'active' ? 'running' : props.ActiveState,
         status: `${props.ActiveState}${props.SubState ? ` (${props.SubState})` : ''}`,
         health: null,
-        ports: (portsByPid.get(mainPid) || []).map((p) => `127.0.0.1:${p}`),
+        ports: ports.map((p) => `127.0.0.1:${p}`),
         // The real port, not the engine's default: a second Postgres cluster on the
         // same host is on 5433, and asking 5432 would talk to the wrong one.
-        port: (portsByPid.get(mainPid) || [])[0] ?? driver?.defaultPort ?? known?.defaultPort ?? null,
+        port: ports[0] ?? driver?.defaultPort ?? known?.defaultPort ?? null,
         limits: {
           memory: numberOrZero(props.MemoryMax),
           memorySwap: null,
@@ -179,6 +184,17 @@ export class DatabasesService {
     }
     for (const list of byPid.values()) list.sort((a, b) => a - b)
     return byPid
+  }
+
+  async _helperPorts(unit) {
+    const res = await this._helper(['unit-ports', unit], 10000)
+    if (!res.ok) return []
+    try {
+      const parsed = JSON.parse(String(res.stdout).trim() || '[]')
+      return Array.isArray(parsed) ? parsed.filter((n) => Number.isFinite(n)) : []
+    } catch {
+      return []
+    }
   }
 
   async _unitProperties(unit) {

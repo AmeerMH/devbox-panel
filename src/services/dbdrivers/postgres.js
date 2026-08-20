@@ -79,7 +79,8 @@ export const postgres = {
 
 function toBytes(setting, unit) {
   const n = Number(setting)
-  if (!Number.isFinite(n)) return null
+  // Postgres uses -1 for "inherit / no separate limit" — not a negative size.
+  if (!Number.isFinite(n) || n < 0) return null
   switch (unit) {
     case '8kB': return n * 8 * 1024
     case 'kB': return n * 1024

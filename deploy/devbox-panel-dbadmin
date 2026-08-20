@@ -10,6 +10,7 @@
 # runs arbitrary SQL or an arbitrary systemctl command.
 #
 #   ping
+#   unit-ports   <unit>
 #   systemd-show <unit>
 #   systemd-set  <unit> <MemoryMax|-> <CPUQuota|->
 #   pg-version   <port>
@@ -44,6 +45,21 @@ verb=${1:-}
 case "$verb" in
   ping)
     echo '{"ok":true,"helper":"devbox-panel-dbadmin","version":1}'
+    ;;
+
+  unit-ports)
+    unit=${2:-}
+    valid_unit "$unit" || die "unit not allowed: $unit"
+    pid=$(systemctl show "$unit" -p MainPID --value 2>/dev/null)
+    [ -n "$pid" ] && [ "$pid" != "0" ] || { echo "[]"; exit 0; }
+    # `ss` only reveals another user's sockets to root, which is the whole reason
+    # this verb exists: the panel cannot see which port a host database listens on.
+    ss -tlnpH 2>/dev/null | awk -v pid="pid=$pid" '
+      index($0, pid) > 0 {
+        split($4, a, ":"); port = a[length(a)]
+        if (!(port in seen)) { seen[port] = 1; out = out (n++ ? "," : "") port }
+      }
+      END { printf "[%s]\n", out }'
     ;;
 
   systemd-show)

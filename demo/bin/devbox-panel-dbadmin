@@ -10,6 +10,7 @@ mkdir -p "$(dirname "$STATE")"
 case "${1:-}" in
   ping) echo '{"ok":true,"helper":"devbox-panel-dbadmin","version":1,"demo":true}' ;;
   pg-version) echo "16.4" ;;
+  unit-ports) echo "[5433]" ;;
   pg-show)
     python3 - "$PG_STATE" <<'PY'
 import json, re, sys
