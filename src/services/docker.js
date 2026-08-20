@@ -235,16 +235,24 @@ export class DockerService {
     return run({ cmd: this.bin, args: argv, timeoutMs })
   }
 
-  /** Environment variables declared on the container (image + run env). */
-  async env(name) {
+  /**
+   * Environment and command line of a container. Both matter to the database
+   * drivers: credentials live in the environment for Postgres and MySQL, but Redis
+   * is usually started with `--requirepass <password>` on the command line instead.
+   */
+  async config(name) {
     const res = await this.inspect(name)
-    if (!res.ok) return {}
-    const out = {}
+    if (!res.ok) return { env: {}, cmd: [] }
+    const env = {}
     for (const line of res.data?.Config?.Env || []) {
       const idx = line.indexOf('=')
-      if (idx > 0) out[line.slice(0, idx)] = line.slice(idx + 1)
+      if (idx > 0) env[line.slice(0, idx)] = line.slice(idx + 1)
     }
-    return out
+    return { env, cmd: res.data?.Config?.Cmd || [], entrypoint: res.data?.Config?.Entrypoint || [] }
+  }
+
+  async env(name) {
+    return (await this.config(name)).env
   }
 
   /** argv for a follow-the-logs stream; the websocket layer spawns it. */

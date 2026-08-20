@@ -111,6 +111,8 @@ export class DatabasesService {
       .map((line) => line.trim().split(/\s+/)[0])
       .filter((u) => UNIT_RE.test(u || ''))
 
+    const portsByPid = await this._listeningPortsByPid()
+
     const out = []
     for (const unit of units) {
       const driver = driverForUnit(unit)
@@ -119,6 +121,11 @@ export class DatabasesService {
 
       const props = await this._unitProperties(unit)
       if (props.LoadState === 'not-found' || props.UnitFileState === 'masked') continue
+      // Distributions ship a wrapper unit (postgresql.service) that starts the real
+      // per-cluster units and then exits. It has no process and no port — listing it
+      // would just be a second, dead-looking copy of the database next to it.
+      const mainPid = Number(props.MainPID) || 0
+      if (!mainPid && props.SubState === 'exited') continue
 
       out.push({
         id: `service:${unit}`,
@@ -131,8 +138,10 @@ export class DatabasesService {
         state: props.ActiveState === 'active' ? 'running' : props.ActiveState,
         status: `${props.ActiveState}${props.SubState ? ` (${props.SubState})` : ''}`,
         health: null,
-        ports: [],
-        port: driver?.defaultPort ?? known?.defaultPort ?? null,
+        ports: (portsByPid.get(mainPid) || []).map((p) => `127.0.0.1:${p}`),
+        // The real port, not the engine's default: a second Postgres cluster on the
+        // same host is on 5433, and asking 5432 would talk to the wrong one.
+        port: (portsByPid.get(mainPid) || [])[0] ?? driver?.defaultPort ?? known?.defaultPort ?? null,
         limits: {
           memory: numberOrZero(props.MemoryMax),
           memorySwap: null,
@@ -145,10 +154,31 @@ export class DatabasesService {
           memoryBytes: numberOrZero(props.MemoryCurrent),
           cpu: null,
         },
-        mainPid: Number(props.MainPID) || null,
+        mainPid: mainPid || null,
       })
     }
     return out
+  }
+
+  /** pid -> listening ports, from one `ss` call. Used to find a service's real port. */
+  async _listeningPortsByPid() {
+    const res = await run({ cmd: 'ss', args: ['-tlnpH'], timeoutMs: 8000 })
+    const byPid = new Map()
+    if (!res.ok) return byPid
+    for (const line of String(res.stdout).split('\n')) {
+      const local = line.trim().split(/\s+/)[3]
+      if (!local) continue
+      const port = Number(local.split(':').pop())
+      if (!port) continue
+      for (const m of line.matchAll(/pid=(\d+)/g)) {
+        const pid = Number(m[1])
+        const list = byPid.get(pid) || []
+        if (!list.includes(port)) list.push(port)
+        byPid.set(pid, list)
+      }
+    }
+    for (const list of byPid.values()) list.sort((a, b) => a - b)
+    return byPid
   }
 
   async _unitProperties(unit) {
@@ -194,9 +224,15 @@ export class DatabasesService {
    */
   async _context(database, driver) {
     if (database.kind === 'container') {
-      const env = await this.docker.env(database.name)
+      const config = await this.docker.config(database.name)
+      const env = config.env
+      const cliEnv = {}
+      if (driver.id === 'redis') {
+        const { password } = driver.credentials(config)
+        if (password) cliEnv.REDISCLI_AUTH = password
+      }
       const ctx = {
-        cli: (args, extraEnv = {}) => this.docker.exec({ name: database.name, args, env: extraEnv }),
+        cli: (args, extraEnv = {}) => this.docker.exec({ name: database.name, args, env: { ...cliEnv, ...extraEnv } }),
       }
       if (driver.id === 'postgres') {
         const user = env.POSTGRES_USER || 'postgres'

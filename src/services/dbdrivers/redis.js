@@ -17,9 +17,37 @@ export const redis = {
     { key: 'timeout', label: 'Idle timeout (s)', kind: 'int', apply: 'live', min: 0, max: 100000, help: 'Close idle client connections after this many seconds. 0 disables.' },
   ],
 
+  /**
+   * Redis is nearly always password-protected by a `--requirepass` argument rather
+   * than an environment variable, so both are checked. The password is handed to
+   * redis-cli through REDISCLI_AUTH, which keeps it out of the argument list (and
+   * therefore out of `ps`, the job log and anything the panel returns).
+   */
+  credentials({ env = {}, cmd = [], entrypoint = [] } = {}) {
+    const argv = [...entrypoint, ...cmd]
+    const flagIndex = argv.findIndex((a) => a === '--requirepass')
+    if (flagIndex !== -1 && argv[flagIndex + 1]) return { password: argv[flagIndex + 1] }
+
+    const inline = argv.find((a) => typeof a === 'string' && a.startsWith('--requirepass='))
+    if (inline) return { password: inline.split('=').slice(1).join('=') }
+
+    const fromEnv = env.REDISCLI_AUTH || env.REDIS_PASSWORD || env.REDIS_ARGS?.match(/--requirepass\s+(\S+)/)?.[1]
+    return { password: fromEnv || null }
+  },
+
+  /** redis-cli exits 0 even when the server refuses, so the text has to be checked. */
+  _rejected(res) {
+    const text = `${res.stdout || ''}${res.stderr || ''}`
+    if (/NOAUTH|WRONGPASS/i.test(text)) {
+      return 'this Redis requires a password and the panel could not find one — it looks for --requirepass on the command line and REDIS_PASSWORD/REDISCLI_AUTH in the environment'
+    }
+    if (/^ERR/im.test(text)) return text.trim().split('\n')[0]
+    return null
+  },
+
   async version(ctx) {
     const res = await ctx.cli(['redis-cli', 'INFO', 'server'])
-    if (!res.ok) return null
+    if (!res.ok || this._rejected(res)) return null
     const m = /redis_version:([^\r\n]+)/.exec(res.stdout) || /valkey_version:([^\r\n]+)/.exec(res.stdout)
     return m ? m[1].trim() : null
   },
@@ -28,7 +56,8 @@ export const redis = {
     const values = {}
     for (const tunable of this.tunables) {
       const res = await ctx.cli(['redis-cli', 'CONFIG', 'GET', tunable.key])
-      if (!res.ok) return { ok: false, error: (res.stderr || res.stdout || '').trim(), values }
+      const rejected = this._rejected(res)
+      if (!res.ok || rejected) return { ok: false, error: rejected || (res.stderr || res.stdout || '').trim(), values }
       // CONFIG GET answers with the name on one line and the value on the next.
       const lines = String(res.stdout).split('\n').map((l) => l.trim()).filter(Boolean)
       const raw = lines[1] ?? ''
@@ -45,8 +74,9 @@ export const redis = {
     const value = validateSetting(tunable, rawValue)
 
     const res = await ctx.cli(['redis-cli', 'CONFIG', 'SET', key, String(value)])
-    if (!res.ok || /^ERR/i.test(firstLine(res.stdout))) {
-      return { ok: false, error: (res.stderr || res.stdout || '').trim() }
+    const rejected = this._rejected(res)
+    if (!res.ok || rejected || /^ERR/i.test(firstLine(res.stdout))) {
+      return { ok: false, error: rejected || (res.stderr || res.stdout || '').trim() }
     }
 
     const rewrite = await ctx.cli(['redis-cli', 'CONFIG', 'REWRITE'])

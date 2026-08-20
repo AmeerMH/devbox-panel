@@ -14,7 +14,7 @@ export const mongodb = {
 
   tunables: [
     { key: 'wiredTigerCacheSize', label: 'WiredTiger cache', kind: 'bytes', apply: 'live', min: 256 * 1024 ** 2, help: 'The document/index cache. Mongo defaults to half the machine\'s RAM minus 1 GB — which is wrong the moment the container has a smaller limit than the host.' },
-    { key: 'internalQueryExecMaxBlockingSortBytes', label: 'Max blocking sort', kind: 'bytes', apply: 'live', min: 1024 ** 2, help: 'Memory a sort without an index may use before it fails. Raising it hides a missing index.' },
+    { key: 'maxBlockingSortBytes', label: 'Max blocking sort', kind: 'bytes', apply: 'live', min: 1024 ** 2, help: 'Memory a sort without an index may use before it fails. Raising it hides a missing index.' },
   ],
 
   /** mongosh on 5+, the legacy mongo shell before that. */
@@ -42,7 +42,18 @@ export const mongodb = {
   },
 
   async settings(ctx) {
-    const res = await this.evaluate(ctx, 'JSON.stringify({cache: db.serverStatus().wiredTiger ? db.serverStatus().wiredTiger.cache["maximum bytes configured"] : null, sort: db.adminCommand({getParameter:1, internalQueryExecMaxBlockingSortBytes:1}).internalQueryExecMaxBlockingSortBytes})')
+    // Two shapes to survive: serverStatus returns 64-bit values as Long objects
+    // (JSON.stringify turns those into {high,low}), and the blocking-sort parameter
+    // was renamed in Mongo 6, so both names are tried and a miss is just null.
+    const res = await this.evaluate(ctx, `JSON.stringify((function () {
+      let cache = null
+      try { cache = Number(db.serverStatus().wiredTiger.cache["maximum bytes configured"]) } catch (e) { cache = null }
+      let sort = null
+      for (const name of ["internalQueryMaxBlockingSortMemoryUsageBytes", "internalQueryExecMaxBlockingSortBytes"]) {
+        try { sort = Number(db.adminCommand({getParameter: 1, [name]: 1})[name]); if (sort) break } catch (e) { /* older or newer server */ }
+      }
+      return { cache: cache, sort: sort }
+    })())`)
     if (!res.ok) return { ok: false, error: (res.stderr || res.stdout || '').trim(), values: {} }
     const jsonLine = String(res.stdout).split('\n').map((l) => l.trim()).filter((l) => l.startsWith('{')).pop()
     let parsed = {}
@@ -55,7 +66,7 @@ export const mongodb = {
       ok: true,
       values: {
         wiredTigerCacheSize: { raw: parsed.cache ?? null, bytes: parsed.cache ?? null },
-        internalQueryExecMaxBlockingSortBytes: { raw: parsed.sort ?? null, bytes: parsed.sort ?? null },
+        maxBlockingSortBytes: { raw: parsed.sort ?? null, bytes: parsed.sort ?? null },
       },
     }
   },
@@ -67,7 +78,13 @@ export const mongodb = {
     const expression = key === 'wiredTigerCacheSize'
       // WiredTiger takes its cache size in whole megabytes.
       ? `JSON.stringify(db.adminCommand({setParameter:1, wiredTigerEngineRuntimeConfig:"cache_size=${Math.max(256, Math.round(bytes / 1024 ** 2))}M"}))`
-      : `JSON.stringify(db.adminCommand({setParameter:1, internalQueryExecMaxBlockingSortBytes:${bytes}}))`
+      // Try the modern parameter name first, fall back to the pre-6.0 one.
+      : `JSON.stringify((function () {
+          for (const name of ["internalQueryMaxBlockingSortMemoryUsageBytes", "internalQueryExecMaxBlockingSortBytes"]) {
+            try { const r = db.adminCommand({setParameter: 1, [name]: ${bytes} }); if (r.ok) return r } catch (e) { /* try the other name */ }
+          }
+          return { ok: 0, errmsg: "no blocking-sort parameter on this server" }
+        })())`
 
     const res = await this.evaluate(ctx, expression)
     if (!res.ok) return { ok: false, error: (res.stderr || res.stdout || '').trim() }

@@ -112,3 +112,24 @@ test('mysql falls back to SET GLOBAL when SET PERSIST is unsupported', async () 
   assert.match(result.note, /my\.cnf/)
   assert.deepEqual(tried, ['SET PERSIST max_connections = 250', 'SET GLOBAL max_connections = 250'])
 })
+
+test('redis finds its password on the command line or in the environment', () => {
+  assert.equal(redis.credentials({ cmd: ['redis-server', '--requirepass', 'hunter2', '--appendonly', 'yes'] }).password, 'hunter2')
+  assert.equal(redis.credentials({ cmd: ['redis-server', '--requirepass=hunter2'] }).password, 'hunter2')
+  assert.equal(redis.credentials({ env: { REDIS_PASSWORD: 'fromenv' }, cmd: ['redis-server'] }).password, 'fromenv')
+  assert.equal(redis.credentials({ entrypoint: ['docker-entrypoint.sh'], cmd: ['redis-server'] }).password, null)
+})
+
+test('redis reports an auth failure as an explanation, not as empty settings', async () => {
+  const ctx = { cli: async () => ({ ok: true, stdout: 'NOAUTH Authentication required.\n', stderr: '' }) }
+  const result = await redis.settings(ctx)
+  assert.equal(result.ok, false)
+  assert.match(result.error, /requires a password/)
+  assert.equal(await redis.version(ctx), null)
+})
+
+test('mysql keeps the password out of the argument list', () => {
+  const creds = mysql.credentials({ MYSQL_ROOT_PASSWORD: 'secret' })
+  assert.equal(creds.user, 'root')
+  assert.equal(creds.password, 'secret')
+})
