@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# devbox-panel nginx helper — the ONLY thing the panel is allowed to run as root.
+#
+# The panel user cannot read aaPanel's 0700 vhost directory, cannot read
+# /www/wwwlogs, and cannot signal nginx. Rather than whitelisting `sudo cat`,
+# `sudo tail` and `sudo nginx` (each of which is a root shell in disguise), the
+# sudoers rule whitelists this script, which accepts six verbs and validates its
+# own arguments.
+#
+# Verbs:
+#   status                     JSON: running / pid / version
+#   list                       JSON array of vhost .conf files
+#   show   <file.conf>         print one vhost file
+#   test                       nginx -t
+#   reload                     nginx -t && nginx -s reload
+#   logs                       JSON array of log files
+#   tail   <file.log> [lines]  print the last N lines
+#   tail-follow <file.log> [n] stream the log (tail -F)
+set -uo pipefail
+
+VHOST_DIR=/www/server/panel/vhost/nginx
+LOG_DIR=/www/wwwlogs
+NGINX_BIN=/www/server/nginx/sbin/nginx
+CONF=/etc/devbox-panel/nginx-helper.conf
+[ -r "$CONF" ] && . "$CONF"
+
+die() { echo "$1" >&2; exit 2; }
+
+# No slashes, no dots-dots, nothing but a plain file name — path traversal cannot
+# be expressed in this alphabet.
+valid_name() { [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]] && [[ "$1" != *".."* ]]; }
+
+json_files() { # $1 = dir, $2 = extension filter
+  local dir="$1" ext="$2" first=1 f base size mtime
+  printf '['
+  for f in "$dir"/*"$ext"; do
+    [ -f "$f" ] || continue
+    base=$(basename "$f")
+    valid_name "$base" || continue
+    size=$(stat -c %s "$f" 2>/dev/null || echo 0)
+    mtime=$(stat -c %Y "$f" 2>/dev/null || echo 0)
+    [ $first -eq 1 ] || printf ','
+    first=0
+    printf '{"file":"%s","size":%s,"mtime":%s}' "$base" "$size" "$mtime"
+  done
+  printf ']\n'
+}
+
+verb=${1:-}
+name=${2:-}
+lines=${3:-200}
+[[ "$lines" =~ ^[0-9]{1,5}$ ]] || lines=200
+
+case "$verb" in
+  status)
+    pid=$(pgrep -f "nginx: master" | head -1 || true)
+    version=$("$NGINX_BIN" -v 2>&1 | head -1)
+    printf '{"running":%s,"pid":%s,"version":"%s","vhostDir":"%s","logDir":"%s"}\n' \
+      "$([ -n "$pid" ] && echo true || echo false)" \
+      "${pid:-0}" \
+      "${version//\"/}" \
+      "$VHOST_DIR" "$LOG_DIR"
+    ;;
+
+  list)
+    json_files "$VHOST_DIR" .conf
+    ;;
+
+  show)
+    valid_name "$name" || die "bad file name"
+    [[ "$name" == *.conf ]] || die "only .conf files"
+    [ -f "$VHOST_DIR/$name" ] || die "no such vhost"
+    cat "$VHOST_DIR/$name"
+    ;;
+
+  test)
+    "$NGINX_BIN" -t 2>&1
+    ;;
+
+  reload)
+    if ! "$NGINX_BIN" -t 2>&1; then
+      echo "config test failed — refusing to reload" >&2
+      exit 1
+    fi
+    "$NGINX_BIN" -s reload 2>&1 && echo "reloaded"
+    ;;
+
+  logs)
+    json_files "$LOG_DIR" .log
+    ;;
+
+  tail)
+    valid_name "$name" || die "bad file name"
+    [[ "$name" == *.log ]] || die "only .log files"
+    [ -f "$LOG_DIR/$name" ] || die "no such log"
+    tail -n "$lines" "$LOG_DIR/$name"
+    ;;
+
+  tail-follow)
+    valid_name "$name" || die "bad file name"
+    [[ "$name" == *.log ]] || die "only .log files"
+    [ -f "$LOG_DIR/$name" ] || die "no such log"
+    exec tail -n "$lines" -F "$LOG_DIR/$name"
+    ;;
+
+  *)
+    die "usage: devbox-panel-nginx {status|list|show <f.conf>|test|reload|logs|tail <f.log> [n]|tail-follow <f.log> [n]}"
+    ;;
+esac

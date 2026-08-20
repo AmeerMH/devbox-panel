@@ -1,0 +1,22 @@
+{
+  "name": "devbox-panel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Web control panel for a dev/showcase server: run make targets with live output, manage Docker containers, PM2 apps and nginx.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/",
+    "hash-password": "node bin/hash-password.js",
+    "gen-secret": "node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\""
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}

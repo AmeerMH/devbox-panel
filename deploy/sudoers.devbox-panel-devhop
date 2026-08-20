@@ -1,0 +1,14 @@
+# OPTIONAL — only install this if the panel must run make targets for projects
+# owned by another user (the /srv/projects root with "user": "dev").
+#
+#   install -m 0440 -o root -g root deploy/sudoers.devbox-panel-devhop /etc/sudoers.d/devbox-panel-devhop
+#
+# READ THIS FIRST. `make` runs whatever the Makefile says, so this line lets the
+# panel user execute arbitrary code as `dev`. On this box `dev` has passwordless
+# sudo, which makes the line a path from panel -> dev -> root. It is only
+# acceptable because anyone who can reach the panel can already `make deploy`.
+#
+# If you want the /srv/projects tab WITHOUT that bridge, remove `dev` from the
+# sudo group first, or leave this file uninstalled and keep that root disabled
+# in panel.config.json.
+deploy ALL=(dev) NOPASSWD: /usr/bin/make

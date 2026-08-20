@@ -1,0 +1,12 @@
+# devbox-panel — install as /etc/sudoers.d/devbox-panel (mode 0440, root:root).
+#
+# Grants exactly one command: the nginx helper script. The script itself only
+# knows how to read vhost files, tail logs, run `nginx -t` and reload nginx —
+# it takes no free-form path or shell argument.
+#
+#   install -m 0755 -o root -g root deploy/devbox-panel-nginx /usr/local/bin/devbox-panel-nginx
+#   install -m 0440 -o root -g root deploy/sudoers.devbox-panel /etc/sudoers.d/devbox-panel
+#   visudo -c
+#
+# Replace `deploy` if the panel runs as a different user.
+deploy ALL=(root) NOPASSWD: /usr/local/bin/devbox-panel-nginx

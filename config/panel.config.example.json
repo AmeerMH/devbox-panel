@@ -1,0 +1,58 @@
+{
+  "port": 7070,
+  "host": "127.0.0.1",
+  "dataDir": "./data",
+
+  "jobs": {
+    "maxConcurrent": 6,
+    "bufferBytes": 524288,
+    "historyLimit": 200,
+    "killGraceMs": 8000
+  },
+
+  "roots": [
+    {
+      "label": "deploy",
+      "path": "/home/deploy",
+      "user": null,
+      "note": "Live apps served by pm2. The panel runs as this user, so no sudo hop."
+    },
+    {
+      "label": "dev",
+      "path": "/srv/projects",
+      "user": "dev",
+      "enabled": false,
+      "note": "Dev checkouts owned by user `dev`. Needs the optional sudoers snippet deploy->dev; see deploy/sudoers.devbox-panel-devhop."
+    }
+  ],
+
+  "projectOverrides": {
+    "Shop-Builder": { "deny": ["db-reset", "db-down"] },
+    "Zad-System": { "deny": ["db-reset"] }
+  },
+
+  "dangerPatterns": [
+    "reset", "drop", "wipe", "prune", "destroy", "delete", "purge",
+    "down", "clean", "clean-all", "stop", "seed", "deploy", "restart"
+  ],
+
+  "pm2": {
+    "enabled": true,
+    "bin": "auto",
+    "home": null,
+    "allowDelete": false
+  },
+
+  "docker": {
+    "enabled": true,
+    "bin": "docker",
+    "allowStop": true
+  },
+
+  "nginx": {
+    "enabled": true,
+    "helper": "/usr/local/bin/devbox-panel-nginx",
+    "sudo": true,
+    "allowReload": true
+  }
+}

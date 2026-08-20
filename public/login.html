@@ -1,0 +1,33 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>devbox-panel · sign in</title>
+<link rel="stylesheet" href="/css/app.css">
+<div class="login-wrap">
+  <form class="login-box" id="form">
+    <h1>devbox-panel</h1>
+    <p>Server control panel. Sign in to continue.</p>
+    <input id="password" type="password" placeholder="Password" autocomplete="current-password" autofocus>
+    <button class="primary" type="submit">Sign in</button>
+    <div class="login-error" id="error"></div>
+  </form>
+</div>
+<script type="module">
+  const form = document.getElementById('form')
+  const error = document.getElementById('error')
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    error.textContent = ''
+    const password = document.getElementById('password').value
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      error.textContent = data.error || `Sign-in failed (${res.status})`
+      return
+    }
+    location.href = '/'
+  })
+</script>
