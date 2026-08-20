@@ -1,10 +1,14 @@
 # devbox-panel — install as /etc/sudoers.d/devbox-panel (mode 0440, root:root).
 #
-# Grants exactly one command: the nginx helper script. The script itself only
-# knows how to read vhost files, tail logs, run `nginx -t` and reload nginx —
-# it takes no free-form path or shell argument.
+# Grants two helper scripts, both of which validate their own arguments:
+#   devbox-panel-nginx    read vhost files, tail logs, `nginx -t`, reload
+#   devbox-panel-dbadmin  systemd memory/CPU limits and Postgres settings for
+#                         databases that run as HOST SERVICES (containerised ones
+#                         never need root — they go through `docker exec`)
+# Neither takes a free-form path, shell argument or SQL string.
 #
 #   install -m 0755 -o root -g root deploy/devbox-panel-nginx /usr/local/bin/devbox-panel-nginx
+#   install -m 0755 -o root -g root deploy/devbox-panel-dbadmin /usr/local/bin/devbox-panel-dbadmin
 #   install -m 0440 -o root -g root deploy/sudoers.devbox-panel /etc/sudoers.d/devbox-panel
 #   visudo -c
 #
@@ -14,5 +18,6 @@
 #
 # Replace `deploy` if the panel runs as a different user.
 deploy ALL=(root) NOPASSWD: /usr/local/bin/devbox-panel-nginx
+deploy ALL=(root) NOPASSWD: /usr/local/bin/devbox-panel-dbadmin
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart devbox-panel
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl status devbox-panel

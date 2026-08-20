@@ -10,6 +10,7 @@ import { DockerService } from './services/docker.js'
 import { Pm2Service } from './services/pm2.js'
 import { NginxService } from './services/nginx.js'
 import { SystemService } from './services/system.js'
+import { DatabasesService } from './services/databases.js'
 import { PollerHub, ProcessStreamHub } from './streams.js'
 import { createApiRouter } from './routes/api.js'
 import { attachWebsocket } from './ws.js'
@@ -31,6 +32,7 @@ const docker = new DockerService(cfg)
 const pm2 = new Pm2Service(cfg)
 const nginx = new NginxService(cfg)
 const system = new SystemService(cfg, { version: pkg.version })
+const databases = new DatabasesService(cfg, { docker, system })
 const limiter = new LoginLimiter()
 
 projects.refresh()
@@ -42,6 +44,8 @@ const pollers = new PollerHub()
 pollers.register('pm2', 3000, () => pm2.list())
 pollers.register('docker', 5000, () => docker.list())
 pollers.register('system', 5000, () => system.snapshot())
+// Slower than the others: each tick shells out to `docker stats`, which is not free.
+pollers.register('databases', 10000, () => databases.list())
 
 const streams = new ProcessStreamHub()
 streams.registerPrefix('dockerlogs', (name) => docker.logsArgv(name))
@@ -77,7 +81,7 @@ app.use(express.static(pub, {
   setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
 }))
 
-app.use('/api', createApiRouter({ cfg, jobs, projects, docker, pm2, nginx, system, limiter }))
+app.use('/api', createApiRouter({ cfg, jobs, projects, docker, pm2, nginx, system, databases, limiter }))
 
 app.get('/login', (req, res) => res.sendFile(path.join(pub, 'login.html')))
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok\n'))

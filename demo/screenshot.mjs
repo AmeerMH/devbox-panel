@@ -193,6 +193,31 @@ async function main() {
   await show('jobs', 2000)
   await shot('runs-history')
 
+  await show('databases', 3500)
+  await shot('databases')
+
+  // The engine settings panel, expanded on the Postgres container.
+  await evaluate(`(() => {
+    const card = [...document.querySelectorAll('.card[data-db]')].find((c) => c.dataset.db === 'container:demo-postgres')
+    const btn = [...card.querySelectorAll('button')].find((b) => b.textContent === 'Engine settings')
+    btn.click()
+    card.scrollIntoView({ block: 'start' })
+    return true
+  })()`)
+  await sleep(1500)
+  await shot('database-engine-settings')
+
+  // The limits dialog, on a container that compose owns.
+  await evaluate(`(() => {
+    window.scrollTo(0, 0)
+    const card = [...document.querySelectorAll('.card[data-db]')].find((c) => c.dataset.db === 'container:demo-redis')
+    ;[...card.querySelectorAll('button')].find((b) => b.textContent === 'Memory / CPU limits').click()
+    return true
+  })()`)
+  await sleep(800)
+  await shot('database-limits')
+  await evaluate(`(() => { document.querySelector('.modal-backdrop')?.remove(); return true })()`)
+
   await show('docker', 3500)
   await shot('docker')
 

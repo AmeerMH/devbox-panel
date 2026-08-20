@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# devbox-panel database helper — the second (and last) thing the panel may run as root.
+#
+# It exists for databases that run as HOST SERVICES rather than containers: the
+# panel cannot set a systemd property or talk to a peer-authenticated Postgres
+# socket as its own user. Containerised engines never come through here — those go
+# through `docker exec` under the panel's own account.
+#
+# Every verb takes fixed, validated arguments. There is deliberately no verb that
+# runs arbitrary SQL or an arbitrary systemctl command.
+#
+#   ping
+#   systemd-show <unit>
+#   systemd-set  <unit> <MemoryMax|-> <CPUQuota|->
+#   pg-version   <port>
+#   pg-show      <port>
+#   pg-set       <port> <setting> <value>
+set -uo pipefail
+
+# Units this helper will touch: database services only. A unit outside this list
+# is refused, so the sudoers line cannot be turned into "restart anything".
+UNIT_ALLOW='^(postgresql|mysql|mysqld|mariadb|mongod|mongodb|redis|redis-server|valkey|keydb|clickhouse-server|elasticsearch|opensearch|influxdb|influxd|neo4j|couchdb|memcached|cassandra|scylla-server)(@[A-Za-z0-9._-]+)?\.service$'
+
+# Postgres settings the panel may write. Anything else is refused, so ALTER SYSTEM
+# cannot be pointed at, say, archive_command (which executes a shell command).
+PG_SETTING_ALLOW='^(shared_buffers|effective_cache_size|work_mem|maintenance_work_mem|autovacuum_work_mem|max_connections|temp_buffers|wal_buffers|max_wal_size|min_wal_size|checkpoint_completion_target|random_page_cost|effective_io_concurrency)$'
+PG_VALUE_ALLOW='^[0-9]+(\.[0-9]+)?(B|kB|MB|GB|TB)?$'
+
+PG_SETTINGS_QUERY="SELECT name || '|' || setting || '|' || COALESCE(unit,'') || '|' || source FROM pg_settings WHERE name ~ '${PG_SETTING_ALLOW}'"
+
+die() { echo "$1" >&2; exit 2; }
+
+valid_unit() { [[ "$1" =~ $UNIT_ALLOW ]]; }
+valid_port() { [[ "$1" =~ ^[0-9]{2,5}$ ]]; }
+
+psql_as_postgres() { # $1 = port, $2 = sql
+  local port=$1 sql=$2
+  if ! id postgres >/dev/null 2>&1; then die "no postgres system user on this host"; fi
+  # runuser, not su -c: the SQL is passed as its own argv element, never through a shell.
+  runuser -u postgres -- psql -p "$port" -tAc "$sql" 2>&1
+}
+
+verb=${1:-}
+case "$verb" in
+  ping)
+    echo '{"ok":true,"helper":"devbox-panel-dbadmin","version":1}'
+    ;;
+
+  systemd-show)
+    unit=${2:-}
+    valid_unit "$unit" || die "unit not allowed: $unit"
+    systemctl show "$unit" --no-pager \
+      -p ActiveState -p SubState -p MemoryCurrent -p MemoryMax -p CPUQuotaPerSecUSec -p MainPID
+    ;;
+
+  systemd-set)
+    unit=${2:-}; mem=${3:--}; cpu=${4:--}
+    valid_unit "$unit" || die "unit not allowed: $unit"
+    props=()
+    if [ "$mem" != "-" ]; then
+      [[ "$mem" =~ ^(infinity|[0-9]+)$ ]] || die "bad MemoryMax: $mem"
+      props+=("MemoryMax=$mem")
+    fi
+    if [ "$cpu" != "-" ]; then
+      [[ "$cpu" =~ ^(infinity|[0-9]{1,6}%)$ ]] || die "bad CPUQuota: $cpu"
+      props+=("CPUQuota=$cpu")
+    fi
+    [ ${#props[@]} -gt 0 ] || die "nothing to set"
+    echo "applying to $unit: ${props[*]}"
+    # set-property writes a drop-in AND applies to the running unit, so the limit
+    # survives a reboot without editing the packaged unit file.
+    systemctl set-property "$unit" "${props[@]}"
+    echo "current values:"
+    systemctl show "$unit" --no-pager -p MemoryMax -p CPUQuotaPerSecUSec -p MemoryCurrent
+    ;;
+
+  pg-version)
+    port=${2:-}
+    valid_port "$port" || die "bad port"
+    psql_as_postgres "$port" "SHOW server_version"
+    ;;
+
+  pg-show)
+    port=${2:-}
+    valid_port "$port" || die "bad port"
+    psql_as_postgres "$port" "$PG_SETTINGS_QUERY"
+    ;;
+
+  pg-set)
+    port=${2:-}; setting=${3:-}; value=${4:-}
+    valid_port "$port" || die "bad port"
+    [[ "$setting" =~ $PG_SETTING_ALLOW ]] || die "setting not allowed: $setting"
+    [[ "$value" =~ $PG_VALUE_ALLOW ]] || die "bad value: $value"
+    psql_as_postgres "$port" "ALTER SYSTEM SET $setting = '$value'"
+    psql_as_postgres "$port" "SELECT pg_reload_conf()"
+    ;;
+
+  *)
+    die "usage: devbox-panel-dbadmin {ping|systemd-show <unit>|systemd-set <unit> <mem> <cpu>|pg-version <port>|pg-show <port>|pg-set <port> <setting> <value>}"
+    ;;
+esac

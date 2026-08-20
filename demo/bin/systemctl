@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Fake systemctl for the demo: one host-service database, so the Databases tab can
+# show the non-container case (limits via systemd instead of docker update).
+set -uo pipefail
+STATE=${DEMO_SYSTEMD_STATE:-/tmp/devbox-panel-demo/systemd-state.json}
+mkdir -p "$(dirname "$STATE")"
+[ -f "$STATE" ] || echo '{"postgresql@16-main.service": {"MemoryMax": 0, "CPUQuota": "infinity"}}' > "$STATE"
+
+case "${1:-}" in
+  list-units)
+    echo "postgresql@16-main.service                loaded active running   PostgreSQL Cluster 16-main"
+    echo "ssh.service                               loaded active running   OpenBSD Secure Shell server"
+    ;;
+  show)
+    unit=${2:-}
+    if [ "$unit" != "postgresql@16-main.service" ]; then
+      echo "LoadState=not-found"; exit 0
+    fi
+    python3 - "$STATE" <<'PY'
+import json, sys
+s = json.load(open(sys.argv[1]))["postgresql@16-main.service"]
+mem = s.get("MemoryMax", 0)
+print("ActiveState=active")
+print("SubState=running")
+print("LoadState=loaded")
+print("UnitFileState=enabled")
+print("MemoryCurrent=2952790016")
+print(f"MemoryMax={mem if mem else 'infinity'}")
+print("MemoryLow=0")
+quota = s.get("CPUQuota", "infinity")
+print(f"CPUQuotaPerSecUSec={quota}")
+print("MainPID=1085")
+print("Restart=on-failure")
+PY
+    ;;
+  *) echo "systemctl: demo stub (${1:-})" ;;
+esac

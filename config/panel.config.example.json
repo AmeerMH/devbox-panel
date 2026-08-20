@@ -54,5 +54,12 @@
     "helper": "/usr/local/bin/devbox-panel-nginx",
     "sudo": true,
     "allowReload": true
+  },
+
+  "databases": {
+    "enabled": true,
+    "helper": "/usr/local/bin/devbox-panel-dbadmin",
+    "sudo": true,
+    "scanServices": true
   }
 }

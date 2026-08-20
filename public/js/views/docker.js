@@ -1,7 +1,21 @@
 import { api } from '../api.js'
-import { el, clear, toast, confirmDialog, statusBadge } from '../ui.js'
+import { el, clear, toast, confirmDialog, formDialog, fmtBytes, statusBadge } from '../ui.js'
 
 /** Live container table (pushed every 5s from the server) with logs and lifecycle actions. */
+function toInput(bytes) {
+  if (!bytes) return 'unlimited'
+  if (bytes % 1024 ** 3 === 0) return `${bytes / 1024 ** 3}g`
+  if (bytes % 1024 ** 2 === 0) return `${bytes / 1024 ** 2}m`
+  return String(bytes)
+}
+
+function limitLabel(container) {
+  const parts = []
+  if (container.limits?.memory) parts.push(fmtBytes(container.limits.memory))
+  if (container.limits?.cpus) parts.push(`${container.limits.cpus} cpu`)
+  return parts.join(' · ') || '–'
+}
+
 export const dockerView = {
   id: 'docker',
   label: 'Docker',
@@ -38,7 +52,9 @@ export const dockerView = {
       el('td', { class: 'mono small muted ellipsis' }, c.image),
       el('td', { class: 'small muted' }, c.status),
       el('td', { class: 'mono small' }, c.ports.join(', ') || '–'),
+      el('td', { class: 'mono small muted' }, limitLabel(c)),
       el('td', { class: 'right' }, el('div', { class: 'row actions' },
+        el('button', { class: 'small', onclick: () => this.editLimits(c) }, 'Limits'),
         el('button', { class: 'small', onclick: () => this.logs(c) }, 'Logs'),
         el('button', { class: 'small', onclick: () => this.inspect(c) }, 'Inspect'),
         c.state === 'running'
@@ -51,7 +67,7 @@ export const dockerView = {
     clear(this.body).append(el('div', { class: 'table-wrap' }, el('table', {},
       el('thead', {}, el('tr', {},
         el('th', {}, 'State'), el('th', {}, 'Name'), el('th', {}, 'Image'),
-        el('th', {}, 'Status'), el('th', {}, 'Ports'), el('th', {}, ''),
+        el('th', {}, 'Status'), el('th', {}, 'Ports'), el('th', {}, 'Limits'), el('th', {}, ''),
       )),
       el('tbody', {}, rows),
     )))
@@ -73,6 +89,45 @@ export const dockerView = {
       )))
     } catch (err) {
       clear(this.statsBox).append(el('div', { class: 'card' }, err.message))
+    }
+  },
+
+  /** Live memory/CPU limits for ANY container, database or not. */
+  async editLimits(container) {
+    let current = {}
+    try {
+      const res = await api.get(`/docker/${encodeURIComponent(container.name)}/resources`)
+      current = res.resources || {}
+    } catch (err) {
+      toast(err.message, 'bad')
+      return
+    }
+
+    const values = await formDialog({
+      title: `Limits · ${container.name}`,
+      intro: 'Applied with `docker update`: live, no recreate, no downtime.',
+      warning: current.composeProject
+        ? `This container belongs to compose project "${current.composeProject}". The change applies now, but \`docker compose up\` recreates it from the file — mirror the values there.`
+        : null,
+      fields: [
+        { name: 'memory', label: 'Memory limit', value: current.memory ? toInput(current.memory) : 'unlimited', placeholder: '2g, 512m, unlimited', help: 'Hard ceiling — the kernel OOM-kills the process past this.' },
+        { name: 'memoryReservation', label: 'Memory reservation (soft)', value: current.memoryReservation ? toInput(current.memoryReservation) : 'unlimited', placeholder: '1g', help: 'Soft target under memory pressure. Never above the hard limit.' },
+        { name: 'cpus', label: 'CPU limit', value: current.cpus ? String(current.cpus) : 'unlimited', placeholder: '1.5, unlimited', help: 'Cores, fractional allowed.' },
+        { name: 'restartPolicy', label: 'Restart policy', type: 'select', value: current.restartPolicy || 'no', options: ['no', 'on-failure', 'always', 'unless-stopped'] },
+      ],
+      submitLabel: 'Apply limits',
+    })
+    if (!values) return
+
+    const payload = {}
+    for (const [k, v] of Object.entries(values)) if (v !== '') payload[k] = v
+    if (payload.restartPolicy === (current.restartPolicy || 'no')) delete payload.restartPolicy
+
+    try {
+      const { job } = await api.post(`/docker/${encodeURIComponent(container.name)}/limits`, payload)
+      this.ctx.dock.openJob(job)
+    } catch (err) {
+      toast(err.message, 'bad')
     }
   },
 

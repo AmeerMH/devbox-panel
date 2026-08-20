@@ -75,6 +75,63 @@ export function confirmDialog({ title, body, confirmLabel = 'Run it', danger = t
   })
 }
 
+/**
+ * Small form dialog. Resolves to an object of values, or null if dismissed.
+ * fields: [{ name, label, value, placeholder, help, type: 'text'|'select', options }]
+ */
+export function formDialog({ title, intro, fields, submitLabel = 'Apply', warning }) {
+  return new Promise((resolve) => {
+    const inputs = new Map()
+    const errorLine = el('div', { class: 'small', style: 'color:var(--bad); min-height:16px; margin-top:8px' })
+
+    const close = (value) => {
+      backdrop.remove()
+      document.removeEventListener('keydown', onKey)
+      resolve(value)
+    }
+    const submit = () => {
+      const out = {}
+      for (const [name, input] of inputs) out[name] = input.value.trim()
+      close(out)
+    }
+    const onKey = (e) => {
+      if (e.key === 'Escape') close(null)
+      if (e.key === 'Enter' && e.target.tagName === 'INPUT') submit()
+    }
+
+    const rows = fields.map((f) => {
+      const input = f.type === 'select'
+        ? el('select', { class: 'field' }, ...f.options.map((o) =>
+            el('option', { value: typeof o === 'string' ? o : o.value, selected: (typeof o === 'string' ? o : o.value) === f.value }, typeof o === 'string' ? o : o.label)))
+        : el('input', { class: 'field', type: 'text', value: f.value ?? '', placeholder: f.placeholder || '' })
+      inputs.set(f.name, input)
+      return el('div', { class: 'field-row' },
+        el('label', {}, f.label),
+        input,
+        f.help ? el('div', { class: 'small muted', style: 'margin-top:4px; line-height:1.5' }, f.help) : null,
+      )
+    })
+
+    const backdrop = el('div', { class: 'modal-backdrop', onclick: (e) => { if (e.target === backdrop) close(null) } },
+      el('div', { class: 'modal' },
+        el('h3', {}, title),
+        intro ? el('div', { class: 'small muted', style: 'margin-bottom:14px; line-height:1.6' }, intro) : null,
+        warning ? el('div', { class: 'notice', style: 'margin-bottom:14px' }, warning) : null,
+        ...rows,
+        errorLine,
+        el('div', { class: 'row', style: 'margin-top:16px' },
+          el('div', { class: 'spacer' }),
+          el('button', { onclick: () => close(null) }, 'Cancel'),
+          el('button', { class: 'primary', onclick: submit }, submitLabel),
+        ),
+      ),
+    )
+    document.body.append(backdrop)
+    document.addEventListener('keydown', onKey)
+    setTimeout(() => inputs.values().next().value?.focus(), 30)
+  })
+}
+
 export function statusBadge(status) {
   const map = {
     running: 'run', online: 'ok', done: 'ok', healthy: 'ok',

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Fake root helper for the demo — same verbs as deploy/devbox-panel-dbadmin,
+# but it edits a JSON file instead of a real system.
+set -uo pipefail
+STATE=${DEMO_SYSTEMD_STATE:-/tmp/devbox-panel-demo/systemd-state.json}
+PG_STATE=${DEMO_PG_STATE:-/tmp/devbox-panel-demo/pg-native.json}
+mkdir -p "$(dirname "$STATE")"
+[ -f "$PG_STATE" ] || echo '{"shared_buffers":"1GB","effective_cache_size":"8GB","work_mem":"8MB","maintenance_work_mem":"256MB","max_connections":"200"}' > "$PG_STATE"
+
+case "${1:-}" in
+  ping) echo '{"ok":true,"helper":"devbox-panel-dbadmin","version":1,"demo":true}' ;;
+  pg-version) echo "16.4" ;;
+  pg-show)
+    python3 - "$PG_STATE" <<'PY'
+import json, re, sys
+values = json.load(open(sys.argv[1]))
+units = {"kB": 1, "MB": 1024, "GB": 1024 * 1024}
+for name, raw in values.items():
+    m = re.match(r'^(\d+)(kB|MB|GB)?$', str(raw))
+    if m and m.group(2):
+        # pg_settings reports in kB for these
+        print(f"{name}|{int(m.group(1)) * units[m.group(2)]}|kB|configuration file")
+    else:
+        print(f"{name}|{raw}||configuration file")
+PY
+    ;;
+  pg-set)
+    python3 - "$PG_STATE" "${3:-}" "${4:-}" <<'PY'
+import json, sys
+path, key, value = sys.argv[1], sys.argv[2], sys.argv[3]
+values = json.load(open(path))
+values[key] = value
+json.dump(values, open(path, "w"))
+print("ALTER SYSTEM")
+PY
+    echo "t"
+    ;;
+  systemd-set)
+    python3 - "$STATE" "${2:-}" "${3:-}" "${4:-}" <<'PY'
+import json, sys
+path, unit, mem, cpu = sys.argv[1:5]
+state = json.load(open(path))
+entry = state.setdefault(unit, {})
+if mem != "-": entry["MemoryMax"] = 0 if mem == "infinity" else int(mem)
+if cpu != "-": entry["CPUQuota"] = cpu if cpu == "infinity" else f"{int(cpu.rstrip('%')) * 10}ms"
+json.dump(state, open(path, "w"), indent=1)
+print(f"applying to {unit}: MemoryMax={mem} CPUQuota={cpu}")
+print("current values:")
+print(json.dumps(entry))
+PY
+    ;;
+  *) echo "usage: devbox-panel-dbadmin {ping|pg-show|pg-set|systemd-set} (demo stub)" >&2; exit 2 ;;
+esac

@@ -2,6 +2,7 @@ import express from 'express'
 import fs from 'node:fs'
 import path from 'node:path'
 import { COOKIE_NAME, newSession, parseCookies, verifyPassword, verifySession } from '../auth.js'
+import { DatabasesService } from '../services/databases.js'
 
 export function clientIp(req, behindProxy) {
   if (behindProxy) {
@@ -34,7 +35,7 @@ function cookieOptions(cfg) {
 const asyncRoute = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next)
 
 export function createApiRouter(ctx) {
-  const { cfg, jobs, projects, docker, pm2, nginx, system, limiter } = ctx
+  const { cfg, jobs, projects, docker, pm2, nginx, system, databases, limiter } = ctx
   const router = express.Router()
 
   /* ------------------------------------------------------------------ auth */
@@ -87,8 +88,14 @@ export function createApiRouter(ctx) {
   /* --------------------------------------------------------------- health */
 
   router.get('/health', asyncRoute(async (req, res) => {
-    const [d, p, n] = await Promise.all([docker.health(), pm2.health(), nginx.health()])
-    res.json({ docker: d, pm2: p, nginx: n, roots: cfg.roots.map((r) => ({ label: r.label, path: r.path, user: r.user || null })) })
+    const [d, p, n, db] = await Promise.all([docker.health(), pm2.health(), nginx.health(), databases.helperHealth()])
+    res.json({
+      docker: d,
+      pm2: p,
+      nginx: n,
+      dbHelper: db,
+      roots: cfg.roots.map((r) => ({ label: r.label, path: r.path, user: r.user || null })),
+    })
   }))
 
   /* ------------------------------------------------------------- projects */
@@ -161,6 +168,13 @@ export function createApiRouter(ctx) {
   router.get('/docker', asyncRoute(async (req, res) => res.json(await docker.list())))
   router.get('/docker/stats', asyncRoute(async (req, res) => res.json(await docker.stats())))
   router.get('/docker/:name/inspect', asyncRoute(async (req, res) => res.json(await docker.inspect(req.params.name))))
+  router.get('/docker/:name/resources', asyncRoute(async (req, res) => res.json(await docker.resources(req.params.name))))
+  router.post('/docker/:name/limits', asyncRoute(async (req, res) => {
+    const totalMemoryBytes = (await system.memory()).total
+    const job = await docker.updateResources({ jobs, name: req.params.name, limits: req.body || {}, totalMemoryBytes })
+    console.log(`[limits] docker ${req.params.name} <- ${JSON.stringify(req.body)}`)
+    res.json({ job })
+  }))
   router.post('/docker/:name/:action', asyncRoute(async (req, res) => {
     const job = await docker.action({ jobs, name: req.params.name, action: req.params.action })
     res.json({ job })
@@ -187,6 +201,26 @@ export function createApiRouter(ctx) {
     const result = await nginx.reload()
     console.log(`[nginx] reload requested — ${result.ok ? 'ok' : `failed at ${result.stage}`}`)
     res.status(result.ok ? 200 : 400).json(result)
+  }))
+
+  /* ------------------------------------------------------------ databases */
+
+  router.get('/databases', asyncRoute(async (req, res) => res.json(await databases.list())))
+  router.get('/databases/engines', (req, res) => res.json({ engines: DatabasesService.engines() }))
+  router.get('/databases/:id', asyncRoute(async (req, res) => res.json(await databases.detail(req.params.id))))
+
+  router.post('/databases/:id/limits', asyncRoute(async (req, res) => {
+    const job = await databases.applyLimits({ jobs, id: req.params.id, limits: req.body || {} })
+    console.log(`[limits] ${req.params.id} <- ${JSON.stringify(req.body)}`)
+    res.json({ job })
+  }))
+
+  router.post('/databases/:id/settings', asyncRoute(async (req, res) => {
+    const { key, value } = req.body || {}
+    const result = await databases.applySetting({ id: req.params.id, key: String(key ?? ''), value })
+    // Values are logged; they are sizes and counts, never credentials.
+    console.log(`[db] ${req.params.id} ${key} = ${result.applied}`)
+    res.json(result)
   }))
 
   /* --------------------------------------------------------------- system */

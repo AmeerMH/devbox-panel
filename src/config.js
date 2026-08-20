@@ -19,6 +19,7 @@ const DEFAULTS = {
   pm2: { enabled: true, bin: 'auto', home: null, allowDelete: false },
   docker: { enabled: true, bin: 'docker', allowStop: true },
   nginx: { enabled: true, helper: '/usr/local/bin/devbox-panel-nginx', sudo: true, allowReload: true },
+  databases: { enabled: true, helper: '/usr/local/bin/devbox-panel-dbadmin', sudo: true, scanServices: true },
 }
 
 function deepMerge(base, extra) {

@@ -16,6 +16,8 @@ DATA="$HERE/data/demo"
 APPS=${DEMO_APPS_DIR:-/tmp/devbox-panel-demo/apps}
 
 mkdir -p "$DATA" "$APPS"
+# Fresh limit/settings state on every demo run, so screenshots are reproducible.
+rm -f /tmp/devbox-panel-demo/docker-state.json /tmp/devbox-panel-demo/systemd-state.json /tmp/devbox-panel-demo/pg-native.json
 for p in storefront api-gateway admin-console marketing-site; do
   mkdir -p "$APPS/$p"
   cp -R "$HERE/demo/projects/$p/." "$APPS/$p/"
@@ -34,6 +36,7 @@ cat > "$DATA/panel.config.json" <<JSON
   "pm2": { "bin": "$HERE/demo/bin/pm2" },
   "docker": { "bin": "$HERE/demo/bin/docker" },
   "nginx": { "helper": "$HERE/demo/bin/nginx-helper", "sudo": false },
+  "databases": { "enabled": true, "helper": "$HERE/demo/bin/devbox-panel-dbadmin", "sudo": false, "scanServices": true },
   "demoSystem": {
     "host": "app-server-01",
     "platform": "Linux 6.8.0-generic",

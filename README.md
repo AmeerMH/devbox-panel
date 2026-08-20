@@ -86,10 +86,58 @@ Jobs are spawned **detached**, so restarting or updating the panel does not kill
 running deploy. Those jobs come back marked `orphaned`: the log file is complete,
 only the live stream is gone.
 
+### Databases — any engine, container or host service
+
+Databases are found two ways: containers matched by image, and host services matched
+by unit name. Everything found gets the same outside view — live usage against its
+limit, with the bar going amber then red as it approaches.
+
+![Databases](docs/screenshots/databases.png)
+
+**Memory and CPU limits are editable from here**, for every engine equally. On a
+container that is `docker update`: live, no recreate, no downtime. On a host service
+it is `systemctl set-property`, which writes a drop-in so the limit also survives a
+reboot. If the container belongs to a compose project the dialog says so, because
+`docker compose up` will later recreate it from the file and undo the change.
+
+![Editing a container's limits](docs/screenshots/database-limits.png)
+
+**Engines with a driver also expose their own memory knobs** — the part a container
+limit alone cannot do. Postgres with 4 GB of `shared_buffers` inside a 2 GB container
+is an OOM kill waiting for traffic; Redis with no `maxmemory` will happily grow until
+the same thing happens. Shipped drivers:
+
+| Engine | Read | Write | Notes |
+|---|---|---|---|
+| PostgreSQL (incl. pgvector, TimescaleDB, PostGIS) | `pg_settings` | `ALTER SYSTEM` + reload | 12 settings: shared buffers, work_mem, cache size, WAL, planner costs. Survives restarts via `postgresql.auto.conf`. |
+| MySQL / MariaDB / Percona | `global_variables` | `SET PERSIST`, falling back to `SET GLOBAL` | Buffer pool, per-connection buffers, table cache, IO capacity. |
+| Redis / Valkey / KeyDB | `CONFIG GET` | `CONFIG SET` + `CONFIG REWRITE` | maxmemory and the eviction policy — the two that decide whether a cache degrades or dies. |
+| MongoDB | `serverStatus` | `setParameter` | WiredTiger cache size, live. Says plainly that Mongo will not persist it. |
+
+Anything else the panel recognises — OpenSearch, ClickHouse, Cassandra, InfluxDB,
+Neo4j, CouchDB, Memcached, CockroachDB, Qdrant, Milvus, Weaviate, Meilisearch,
+Typesense, etcd, Kafka, RabbitMQ, MinIO, SQL Server, Oracle — is listed with live
+usage and editable limits, and says "no engine driver" instead of pretending.
+
+![Engine settings for a Postgres container](docs/screenshots/database-engine-settings.png)
+
+Every value is parsed and re-serialised by the panel before it goes anywhere: a
+setting name must be one the driver declares, a size is turned into a number and
+formatted back out, an enum must be one of its options. `work_mem` accepts `16m`;
+it does not accept `16m'; DROP DATABASE x; --`.
+
+Database passwords are never stored. Container engines are reached with
+`docker exec` over the container's own loopback socket, where the engine trusts a
+local connection; MySQL is the exception and its root password is read from the
+container's own environment and passed through `MYSQL_PWD` for exactly one exec —
+never logged, never returned to the browser.
+
 ### Docker
 
-Containers with state, health, ports and compose project; start/stop/restart;
-`docker logs -f` streamed into the same terminal dock; an on-demand CPU/memory sample.
+Containers with state, health, ports, current limits and compose project;
+start/stop/restart; `docker logs -f` streamed into the same terminal dock; an
+on-demand CPU/memory sample. The same limits editor as the Databases tab is here
+too, for every container — not just the databases.
 
 ![Docker containers](docs/screenshots/docker.png)
 
@@ -146,7 +194,8 @@ This panel executes `make`, `docker`, `pm2` and `nginx -s reload` on your server
 | Deny list | `projectOverrides.<project>.deny` removes targets from the UI *and* the API. |
 | Confirmation | Dangerous targets need an explicit confirm (HTTP 428 otherwise). |
 | Guarded reload | `nginx -s reload` only after `nginx -t` passes. |
-| Root surface | One sudoers line, for one script with six fixed verbs and its own argument validation. |
+| Root surface | Two sudoers lines, for two scripts with fixed verbs and their own argument validation — the nginx helper, and a database helper for host services (systemd limits, and Postgres settings from an allowlist). Containerised engines need no root at all. |
+| Limit validation | Sizes and CPU counts are parsed into numbers, bounded (≥6 MiB, ≤ host RAM), and re-serialised before they reach `docker update` or `systemctl`. |
 
 It binds `127.0.0.1` by default — nginx is the only way in. The vhost template
 carries a commented-out `allow`/`deny` block if you want a second lock.
@@ -215,6 +264,9 @@ would rather the panel never be reachable from the public internet at all.
 | `pm2.home` | Sets `PM2_HOME` when the daemon does not live in the panel user's home. |
 | `docker.allowStop` | `false` makes the Docker tab start/restart-only. |
 | `nginx.helper`, `nginx.sudo`, `nginx.allowReload` | Helper path, whether to sudo it, whether reloads are allowed. |
+| `databases.enabled` | Turns the Databases tab off entirely. |
+| `databases.helper`, `databases.sudo` | The root helper used for host-service databases (systemd limits, Postgres settings). Containers never use it. |
+| `databases.scanServices` | Set `false` to look only at containers and skip the systemd unit scan. |
 
 Secrets live in `.env`: `PANEL_PASSWORD_HASH`, `PANEL_SESSION_SECRET`, and
 optionally `PANEL_PORT`, `PANEL_HOST`, `PANEL_BEHIND_PROXY`, `PANEL_SESSION_HOURS`,
@@ -240,7 +292,8 @@ src/
   ws.js                one websocket, many channels, cookie-authenticated
   jobs/job-manager.js  spawn, stream, cancel, persist, trim
   routes/api.js        the REST surface
-  services/            projects, makefile, docker, pm2, nginx, system
+  services/            projects, makefile, docker, pm2, nginx, system, databases
+  services/dbdrivers/  one module per engine: postgres, mysql, redis, mongodb
   util/exec.js         argv-only spawn helpers, sudo hop, login shell
 public/                vanilla ES modules + xterm.js served from node_modules
 demo/                  fake CLIs, fixtures, screenshot driver
@@ -266,6 +319,10 @@ from `node_modules`, so there is nothing to build or bundle.
 | Logs stall or arrive in bursts | nginx buffering: the vhost needs `proxy_buffering off`, and `proxy_cache off` if a cache is enabled at the http level. |
 | Websocket never connects (page loads, dot is red) | The vhost is missing the `Upgrade`/`Connection` headers, or `$connection_upgrade` is undefined. The template shows the `map` to add. |
 | `make deploy` works over SSH but fails here | The recipe depends on an interactive-shell PATH. The panel prepends `~/.npm-global/bin` and `/usr/local/bin`; anything else belongs in the Makefile. |
+| Databases tab: "no engine driver" | The image is recognised but has no driver — limits still work, engine settings do not. Adding one is a single file in `src/services/dbdrivers/`. |
+| Engine settings say the client is missing | The driver talks to the engine through its own CLI inside the container (`psql`, `redis-cli`, `mongosh`). Slim images sometimes ship without it. |
+| A limit reverts after a deploy | The container belongs to a compose project and was recreated. Put the limits in the compose file — the panel warns about exactly this before applying. |
+| Host-service database shows limits but no settings | Only Postgres is supported through the root helper so far; other host engines get limits only. |
 | Reload says `unknown directive "http2"` | nginx < 1.25 takes HTTP/2 on the listen line, not as its own directive. The shipped templates use the compatible form; if you edited yours, use `listen 443 ssl http2;`. The reload is refused rather than applied — the running config is untouched. |
 
 ## Tests
@@ -275,8 +332,11 @@ npm test
 ```
 
 Covers the Makefile parser, the nginx vhost parser, password/session/CSRF/rate-limit
-logic, and the job manager: exit codes, process-group cancellation, the concurrency
-cap, history trimming, and how a restart reports jobs it left running.
+logic, the resource-limit parser (including the values it must refuse), the database
+drivers (image/unit matching, per-kind setting validation, and that each driver
+re-serialises what it was given rather than passing it through), and the job manager:
+exit codes, process-group cancellation, the concurrency cap, history trimming, and how
+a restart reports jobs it left running.
 
 ## License
 

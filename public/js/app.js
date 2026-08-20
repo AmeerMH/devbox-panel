@@ -5,11 +5,12 @@ import { el, clear, toast } from './ui.js'
 import { projectsView } from './views/projects.js'
 import { jobsView } from './views/jobs.js'
 import { dockerView } from './views/docker.js'
+import { databasesView } from './views/databases.js'
 import { pm2View } from './views/pm2.js'
 import { nginxView } from './views/nginx.js'
 import { systemView } from './views/system.js'
 
-const VIEWS = [projectsView, jobsView, dockerView, pm2View, nginxView, systemView]
+const VIEWS = [projectsView, jobsView, databasesView, dockerView, pm2View, nginxView, systemView]
 
 const state = {
   current: null,

@@ -26,8 +26,9 @@ id "$PANEL_USER" >/dev/null 2>&1 || { echo "no such user: $PANEL_USER" >&2; exit
 echo "→ repo:  $REPO_DIR"
 echo "→ user:  $PANEL_USER"
 
-echo "→ installing the nginx helper"
+echo "→ installing the helper scripts"
 install -m 0755 -o root -g root "$REPO_DIR/deploy/devbox-panel-nginx" /usr/local/bin/devbox-panel-nginx
+install -m 0755 -o root -g root "$REPO_DIR/deploy/devbox-panel-dbadmin" /usr/local/bin/devbox-panel-dbadmin
 
 echo "→ installing the sudoers rule"
 sed "s/^deploy /$PANEL_USER /" "$REPO_DIR/deploy/sudoers.devbox-panel" > /tmp/devbox-panel.sudoers
@@ -63,9 +64,12 @@ else
   echo "→ no docker group on this host; the Docker tab will report itself unavailable"
 fi
 
-echo "→ verifying the helper"
+echo "→ verifying the helpers"
 sudo -n -u "$PANEL_USER" sudo -n /usr/local/bin/devbox-panel-nginx status || {
-  echo "   helper check FAILED — the Nginx tab will be unavailable" >&2
+  echo "   nginx helper check FAILED — the Nginx tab will be unavailable" >&2
+}
+sudo -n -u "$PANEL_USER" sudo -n /usr/local/bin/devbox-panel-dbadmin ping || {
+  echo "   db helper check FAILED — host-service databases will be read-only" >&2
 }
 
 cat <<NEXT

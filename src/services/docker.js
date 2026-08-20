@@ -1,7 +1,9 @@
 import fs from 'node:fs'
 import { run, parseJsonLines } from '../util/exec.js'
+import { nanoCpusToCpus, toDockerBytes, validateLimits } from '../util/units.js'
 
 const ACTIONS = new Set(['start', 'stop', 'restart'])
+const RESTART_POLICIES = new Set(['no', 'always', 'unless-stopped', 'on-failure'])
 
 /** Docker containers: list, inspect, start/stop/restart, live logs. */
 export class DockerService {
@@ -56,6 +58,14 @@ export class DockerService {
         compose: c.Labels?.match?.(/com\.docker\.compose\.project=([^,]+)/)?.[1] || null,
       }
     })
+    // One inspect for the whole set, so the table can show current limits without
+    // a round trip per row.
+    const details = await this.inspectMany(containers.map((c) => c.name))
+    for (const container of containers) {
+      const data = details.get(container.name)
+      container.limits = data ? DockerService.limitsFrom(data) : null
+    }
+
     containers.sort((a, b) => (a.state === b.state ? a.name.localeCompare(b.name) : a.state === 'running' ? -1 : 1))
     return { ok: true, containers }
   }
@@ -69,6 +79,36 @@ export class DockerService {
       stats: parseJsonLines(res.stdout).map((s) => ({
         name: s.Name, cpu: s.CPUPerc, mem: s.MemUsage, memPerc: s.MemPerc, net: s.NetIO, block: s.BlockIO, pids: s.PIDs,
       })),
+    }
+  }
+
+  /** Inspect many containers in one call — `docker inspect` takes a list. */
+  async inspectMany(names) {
+    if (!names.length) return new Map()
+    const res = await run({ cmd: this.bin, args: ['inspect', ...names], timeoutMs: 20000 })
+    if (!res.ok) return new Map()
+    try {
+      return new Map(JSON.parse(res.stdout).map((d) => [String(d.Name || '').replace(/^\//, ''), d]))
+    } catch {
+      return new Map()
+    }
+  }
+
+  /** The limit fields the UI shows, pulled out of an inspect payload. */
+  static limitsFrom(data) {
+    const host = data?.HostConfig || {}
+    const labels = data?.Config?.Labels || {}
+    return {
+      memory: host.Memory ?? 0,
+      memorySwap: host.MemorySwap ?? 0,
+      memoryReservation: host.MemoryReservation ?? 0,
+      cpus: nanoCpusToCpus(host.NanoCpus ?? 0),
+      cpuShares: host.CpuShares ?? 0,
+      pidsLimit: host.PidsLimit ?? 0,
+      restartPolicy: host.RestartPolicy?.Name || 'no',
+      restartRetries: host.RestartPolicy?.MaximumRetryCount ?? 0,
+      composeProject: labels['com.docker.compose.project'] || null,
+      composeService: labels['com.docker.compose.service'] || null,
     }
   }
 
@@ -119,6 +159,92 @@ export class DockerService {
       args: [action, name],
       cwd: process.cwd(),
     })
+  }
+
+  /**
+   * Current cgroup limits, straight from `docker inspect`, plus the compose labels —
+   * the UI needs those to warn that `docker compose up` will undo a live change.
+   */
+  async resources(name) {
+    const res = await this.inspect(name)
+    if (!res.ok) return { ok: false, error: res.error }
+    return { ok: true, resources: DockerService.limitsFrom(res.data) }
+  }
+
+  /**
+   * Apply new limits with `docker update` — live, no recreate, no downtime.
+   *
+   * Runs as a job so the change lands in the Runs history with its output: a
+   * resource limit that silently changed is worse than one you can point at.
+   */
+  async updateResources({ jobs, name, limits, totalMemoryBytes }) {
+    await this.assertExists(name)
+    const normalised = validateLimits(limits, { totalMemoryBytes })
+
+    const args = ['update']
+    if (normalised.memory !== undefined) {
+      args.push('--memory', toDockerBytes(normalised.memory))
+      // memory-swap is the COMBINED memory+swap ceiling, and Docker rejects an
+      // update where it ends up below the memory limit. Unless the caller asked for
+      // something specific, mirror what `docker run -m` does on its own: twice the
+      // limit, or unlimited when the limit itself is removed.
+      if (normalised.memorySwap === undefined) {
+        args.push('--memory-swap', normalised.memory === 0 ? '-1' : toDockerBytes(normalised.memory * 2))
+      }
+    }
+    if (normalised.memorySwap !== undefined) {
+      args.push('--memory-swap', normalised.memorySwap === 0 ? '-1' : toDockerBytes(normalised.memorySwap))
+    }
+    if (normalised.memoryReservation !== undefined) {
+      args.push('--memory-reservation', toDockerBytes(normalised.memoryReservation))
+    }
+    if (normalised.cpus !== undefined) args.push('--cpus', String(normalised.cpus))
+
+    if (limits.restartPolicy !== undefined) {
+      const policy = String(limits.restartPolicy)
+      if (!RESTART_POLICIES.has(policy)) {
+        const err = new Error(`Unsupported restart policy "${policy}"`)
+        err.status = 400
+        throw err
+      }
+      args.push('--restart', policy)
+    }
+
+    args.push(name)
+
+    return jobs.start({
+      kind: 'docker',
+      title: `docker update ${name}`,
+      target: `update:${name}`,
+      cmd: this.bin,
+      args,
+      cwd: process.cwd(),
+    })
+  }
+
+  /**
+   * Run a command inside a container and capture it. Used by the database drivers
+   * to talk to an engine through its own CLI (psql, redis-cli, mongosh) over the
+   * container's loopback — which is why the panel never needs stored credentials.
+   */
+  async exec({ name, args, user = null, env = {}, timeoutMs = 15000 }) {
+    const argv = ['exec']
+    if (user) argv.push('-u', user)
+    for (const [k, v] of Object.entries(env)) argv.push('-e', `${k}=${v}`)
+    argv.push(name, ...args)
+    return run({ cmd: this.bin, args: argv, timeoutMs })
+  }
+
+  /** Environment variables declared on the container (image + run env). */
+  async env(name) {
+    const res = await this.inspect(name)
+    if (!res.ok) return {}
+    const out = {}
+    for (const line of res.data?.Config?.Env || []) {
+      const idx = line.indexOf('=')
+      if (idx > 0) out[line.slice(0, idx)] = line.slice(idx + 1)
+    }
+    return out
   }
 
   /** argv for a follow-the-logs stream; the websocket layer spawns it. */
