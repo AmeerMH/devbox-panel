@@ -22,7 +22,13 @@ const PINO_LEVELS = { 10: 'trace', 20: 'debug', 30: 'info', 40: 'warn', 50: 'err
 export const LEVELS = ['error', 'warn', 'info', 'debug', 'trace', 'fatal', 'other']
 
 /** Lines that open a block: everything after them belongs to them until a new entry starts. */
-const OPENERS = [/^prisma:(error|warn)/i, /^[A-Za-z.]*Error:/, /^(Unhandled|Uncaught)/i]
+const OPENERS = [
+  /^prisma:(error|warn)/i,
+  // Next.js prefixes server errors with ⨯ / ✖ before the Error: itself.
+  /^[⨯✖✗×!]?\s*[A-Za-z.]*Error:/,
+  /^(Unhandled|Uncaught)/i,
+  /^[⨯✖✗×]\s/,
+]
 
 function levelName(value) {
   if (typeof value === 'number') return PINO_LEVELS[value] || 'other'
@@ -126,7 +132,12 @@ export function parseLine(rawLine) {
       entry.level = levelName(level)
       entry.time = toTime(time) ?? entry.time
       entry.msg = String(msg ?? message ?? '')
-      entry.kind = String(kind ?? msg ?? message ?? 'json')
+      // The `kind` field is meant for grouping; falling back to `msg` only works
+      // when the message is short and stable. A paragraph would become a chip.
+      const derived = String(kind ?? msg ?? message ?? 'json')
+      entry.kind = kind
+        ? String(kind).slice(0, 32)
+        : (derived.length <= 32 && !derived.includes('\n') ? derived : 'json')
       entry.fields = rest
       return entry
     } catch {
@@ -200,6 +211,7 @@ export class LogStream {
     // output, so a stack trace from #0 must not attach to a JSON line from #1 that
     // happened to arrive in the middle of it.
     this.openByInstance = new Map()
+    this.lastByInstance = new Map()
   }
 
   push(chunk, now = Date.now()) {
@@ -211,7 +223,10 @@ export class LogStream {
     for (const line of lines) {
       const { instance, rest } = splitPrefix(line)
       const key = instance === null ? 'main' : instance
-      const open = this.openByInstance.get(key)
+      // An indented line is a continuation by universal convention (stack frames,
+      // wrapped SQL, YAML) — even when the line above it did not announce a block.
+      const indented = /^\s+\S/.test(rest)
+      const open = this.openByInstance.get(key) || (indented ? this.lastByInstance.get(key) : null)
 
       if (open && !isEntryStart(line)) {
         const piece = rest.trimEnd()
@@ -245,6 +260,7 @@ export class LogStream {
       this.entries.push(entry)
       added.push(entry)
 
+      this.lastByInstance.set(key, entry)
       if (entry.open) this.openByInstance.set(key, entry)
       else this.openByInstance.delete(key)
     }

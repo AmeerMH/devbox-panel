@@ -193,3 +193,41 @@ test('lines without a timestamp fall back to arrival time, and say so', () => {
   assert.equal(new Date(own.time).toISOString(), '2026-08-20T20:14:17.581Z')
   assert.equal(own.timeSource, undefined, 'a real timestamp is not overwritten')
 })
+
+test('next.js error glyphs open a block, and its trace collapses into it', () => {
+  const stream = new LogStream()
+  stream.push([
+    '8|shop-bui | ⨯ Error: Failed to load external module nodemailer',
+    '8|shop-bui |     at module evaluation (src/lib/email/client.ts:1:1)',
+    '8|shop-bui |     at module evaluation (src/lib/merchant-auth-email.ts:6:1)',
+    '8|shop-bui | {"level":"info","msg":"request","kind":"http","url":"/orders"}',
+    '',
+  ].join('\n'))
+
+  assert.equal(stream.entries.length, 2)
+  assert.equal(stream.entries[0].level, 'error')
+  assert.match(stream.entries[0].detail, /merchant-auth-email/)
+  assert.equal(stream.entries[1].kind, 'http')
+})
+
+test('an indented line continues the line above it even without an opener', () => {
+  const stream = new LogStream()
+  stream.push([
+    '7|shop-bui | The following locations have been searched:',
+    '7|shop-bui |   /home/deploy/app/node_modules/.prisma/client',
+    '7|shop-bui |   /tmp/prisma-engines',
+    '',
+  ].join('\n'))
+  assert.equal(stream.entries.length, 1)
+  assert.match(stream.entries[0].detail, /prisma-engines/)
+})
+
+test('a paragraph-length message never becomes a filter chip', () => {
+  const long = 'x'.repeat(200)
+  const entry = parseLine(JSON.stringify({ level: 'info', msg: long }))
+  assert.equal(entry.kind, 'json')
+  assert.equal(entry.msg, long)
+
+  const kinded = parseLine(JSON.stringify({ level: 'info', msg: long, kind: 'web-vital' }))
+  assert.equal(kinded.kind, 'web-vital')
+})
