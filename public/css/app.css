@@ -391,6 +391,26 @@ pre.code {
 .tunable .row { align-items: flex-start; }
 .tunable .field { width: 150px; }
 
+#boot-error {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  align-items: center;
+  justify-content: center;
+  background: rgba(3, 6, 12, 0.86);
+}
+#boot-error .boot-box {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px 28px;
+  max-width: 460px;
+  text-align: center;
+}
+#boot-error h2 { margin: 0 0 10px; font-size: 17px; }
+#boot-error p { margin: 0 0 18px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+
 .toast-wrap { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 60; }
 .toast {
   background: var(--panel-2);

@@ -16,6 +16,8 @@ const state = {
   current: null,
   counts: { projects: 0, jobs: 0 },
   health: {},
+  version: null,
+  updateNoticed: false,
 }
 
 async function boot() {
@@ -25,6 +27,25 @@ async function boot() {
     location.href = '/login'
     return
   }
+
+  try {
+    await start()
+  } catch (err) {
+    // A blank page is the worst possible failure mode for a control panel: say
+    // what broke and offer the one action that fixes most of it.
+    clear(document.getElementById('view')).append(
+      el('div', { class: 'card' },
+        el('h2', {}, 'The panel failed to start'),
+        el('div', { class: 'small muted', style: 'margin:8px 0 14px' }, err?.message || String(err)),
+        el('button', { class: 'primary', onclick: () => location.reload() }, 'Reload'),
+      ),
+    )
+  } finally {
+    window.__panelBooted = true
+  }
+}
+
+async function start() {
 
   const dot = document.getElementById('conn-dot')
   const sock = new Sock({
@@ -42,9 +63,17 @@ async function boot() {
   // and still see that something is in flight.
   sock.subscribe('jobs', () => refreshBadges())
   sock.subscribe('system', (msg) => {
-    if (msg.type === 'snapshot') {
-      document.getElementById('host-label').textContent =
-        `${msg.payload.host} · load ${msg.payload.load[0].toFixed(2)} · ${msg.payload.panel.user}@panel`
+    if (msg.type !== 'snapshot') return
+    document.getElementById('host-label').textContent =
+      `${msg.payload.host} · load ${msg.payload.load[0].toFixed(2)} · ${msg.payload.panel.user}@panel`
+
+    // The panel deploys itself. When the version underneath this tab changes, the
+    // loaded scripts are stale — say so rather than letting it drift.
+    const version = msg.payload.panel?.version
+    if (!state.version) state.version = version
+    else if (version && version !== state.version && !state.updateNoticed) {
+      state.updateNoticed = true
+      toast(`The panel was updated to v${version} — reload to pick it up.`, 'ok')
     }
   })
 
