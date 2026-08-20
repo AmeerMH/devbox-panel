@@ -1,0 +1,44 @@
+# devbox-panel as a systemd service.
+#
+#   sudo cp deploy/devbox-panel.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now devbox-panel
+#
+# Preferred over running it under PM2 when the panel also MANAGES that PM2
+# daemon: as a PM2 app it would be a child of the thing it restarts, so
+# `pm2 update` or a stray "restart all" would take the panel down with it —
+# and a new group membership (docker) would need the whole daemon restarted.
+[Unit]
+Description=devbox-panel — web control panel for make/docker/pm2/nginx
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+# Docker access without restarting anything else. Remove this line if the panel
+# should not reach the docker socket.
+SupplementaryGroups=docker
+WorkingDirectory=/home/deploy/devbox-panel
+Environment=NODE_ENV=production
+Environment=PANEL_BEHIND_PROXY=1
+Environment=PANEL_CONFIG=/etc/devbox-panel/panel.config.json
+EnvironmentFile=/home/deploy/devbox-panel/.env
+ExecStart=/usr/bin/node src/server.js
+Restart=always
+RestartSec=3
+
+# Jobs are deliberately detached (a deploy must survive a panel restart), so
+# systemd must stop the panel only — not sweep its control group.
+KillMode=process
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# Cheap hardening. NoNewPrivileges is deliberately NOT set: the panel calls
+# `sudo devbox-panel-nginx` and, if configured, `sudo -u <user> make`.
+PrivateTmp=false
+ProtectSystem=false
+
+[Install]
+WantedBy=multi-user.target

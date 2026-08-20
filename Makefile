@@ -30,14 +30,19 @@ start: ## Run the server in the foreground
 test: ## Run the unit tests
 	npm test
 
-deploy: ## [SERVER] Pull main, install production deps, reload pm2
+deploy: ## [SERVER] Pull main, install production deps, restart the service
 	@echo "→ Pulling main"
 	git fetch --all --prune
 	git reset --hard origin/main
 	@echo "→ Installing production dependencies"
 	npm ci --omit=dev
-	@echo "→ Reloading pm2"
-	@$(PM2) reload devbox-panel --update-env || $(PM2) start deploy/ecosystem.config.cjs
+	@echo "→ Restarting"
+	@if systemctl list-unit-files devbox-panel.service >/dev/null 2>&1 && \
+	    systemctl is-enabled devbox-panel >/dev/null 2>&1; then \
+		sudo systemctl restart devbox-panel; \
+	else \
+		$(PM2) reload devbox-panel --update-env || $(PM2) start deploy/ecosystem.config.cjs; \
+	fi
 
 self-update: ## [SERVER] Same as deploy, detached — use this when triggering it FROM the panel
 	@# Reloading the panel from inside the panel kills the job streaming its own
@@ -45,11 +50,19 @@ self-update: ## [SERVER] Same as deploy, detached — use this when triggering i
 	@setsid bash -c 'cd $(CURDIR) && make deploy >> $(CURDIR)/data/self-update.log 2>&1' &
 	@echo "self-update started in the background — see data/self-update.log"
 
-logs: ## [SERVER] Tail the panel's own pm2 logs
-	@$(PM2) logs devbox-panel --lines 100
+logs: ## [SERVER] Tail the panel's own logs
+	@if systemctl is-enabled devbox-panel >/dev/null 2>&1; then \
+		journalctl -u devbox-panel -n 100 -f; \
+	else \
+		$(PM2) logs devbox-panel --lines 100; \
+	fi
 
-status: ## [SERVER] pm2 status for the panel
-	@$(PM2) describe devbox-panel
+status: ## [SERVER] Service status for the panel
+	@if systemctl is-enabled devbox-panel >/dev/null 2>&1; then \
+		systemctl status devbox-panel --no-pager; \
+	else \
+		$(PM2) describe devbox-panel; \
+	fi
 
 install-server: ## [SERVER, once, needs root] Install the nginx helper + sudoers + config skeleton
 	sudo bash deploy/install.sh

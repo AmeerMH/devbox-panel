@@ -170,8 +170,8 @@ npm run hash-password     # -> PANEL_PASSWORD_HASH in .env
 
 # 4. edit /etc/devbox-panel/panel.config.json — roots, deny lists, pm2 bin
 
-# 5. run it
-pm2 start deploy/ecosystem.config.cjs && pm2 save
+# 5. run it (systemd is preferred — see the note below)
+sudo systemctl enable --now devbox-panel
 
 # 6. publish it
 sudo cp deploy/nginx-public-domain.conf /etc/nginx/conf.d/panel.<domain>.conf
@@ -180,9 +180,15 @@ sudo sed -i 's/PANEL_DOMAIN/panel.<domain>/g' /etc/nginx/conf.d/panel.<domain>.c
 sudo /usr/local/bin/devbox-panel-nginx reload
 ```
 
+**systemd or PM2?** The repo ships both a unit file and a PM2 ecosystem file, but
+prefer systemd when the panel manages that same PM2 daemon: as a PM2 app the panel
+is a child of the thing it restarts, so `pm2 update` — or a stray "restart all" —
+takes the panel down with it. The unit also grants the `docker` supplementary
+group directly, and uses `KillMode=process` so restarting the panel does not sweep
+away the detached deploys it started.
+
 `deploy/install.sh` also offers to add the panel user to the `docker` group — that
-group is root-equivalent, and the script says so before doing it. Restart the
-process afterwards; a new group only applies to new processes.
+group is root-equivalent, and the script says so before doing it.
 
 Updating later: `make deploy` in the checkout, or click `self-update` in the panel
 — that target detaches itself, because reloading the panel from inside the panel

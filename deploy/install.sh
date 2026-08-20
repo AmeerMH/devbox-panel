@@ -46,6 +46,11 @@ else
   echo "   $CONFIG_DIR/panel.config.json already exists — left untouched"
 fi
 
+echo "→ installing the systemd unit (not enabled — start it when the config is ready)"
+sed "s|^User=deploy$|User=$PANEL_USER|; s|^Group=deploy$|Group=$PANEL_USER|; s|/home/deploy/devbox-panel|$REPO_DIR|g" \
+  "$REPO_DIR/deploy/devbox-panel.service" > /etc/systemd/system/devbox-panel.service
+systemctl daemon-reload
+
 if getent group docker >/dev/null; then
   if id -nG "$PANEL_USER" | tr ' ' '\n' | grep -qx docker; then
     echo "→ $PANEL_USER is already in the docker group"
@@ -71,7 +76,12 @@ Root-side install done. Now, as $PANEL_USER:
   npm ci --omit=dev
   npm run gen-secret        # -> PANEL_SESSION_SECRET in .env
   npm run hash-password     # -> PANEL_PASSWORD_HASH in .env
-  pm2 start deploy/ecosystem.config.cjs && pm2 save
+
+Edit $CONFIG_DIR/panel.config.json, then start it:
+
+  sudo systemctl enable --now devbox-panel     # recommended
+  # or, if you would rather run it under PM2:
+  # pm2 start deploy/ecosystem.config.cjs && pm2 save
 
 Then publish it: copy deploy/nginx-public-domain.conf into the vhost directory,
 replace PANEL_DOMAIN, issue a certificate, and reload nginx.
