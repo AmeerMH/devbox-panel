@@ -224,6 +224,35 @@ async function main() {
   await show('pm2', 3500)
   await shot('pm2')
 
+  // Open the merged cluster log, let it fill, then filter it down to the errors.
+  await evaluate(`(() => {
+    const row = [...document.querySelectorAll('tbody tr')].find((r) => r.textContent.includes('storefront'))
+    ;[...row.querySelectorAll('button')].find((b) => b.textContent === 'Logs').click()
+    return true
+  })()`)
+  await sleep(26000) // the demo app emits its periodic error every ~12s
+  await shot('logs-structured')
+
+  await evaluate(`(() => {
+    const chip = [...document.querySelectorAll('.logchip')].find((c) => c.textContent.startsWith('error'))
+    if (chip) chip.click()
+    const first = document.querySelector('.logrow.expandable')
+    if (first) first.click()
+    return true
+  })()`)
+  await sleep(1200)
+  await shot('logs-filtered')
+
+  // Expanded cluster: the two workers behind the grouped row.
+  await evaluate(`(() => {
+    document.querySelectorAll('#dock .tab .x').forEach((x) => x.click())
+    const caret = document.querySelector('button.caret')
+    if (caret) caret.click()
+    return true
+  })()`)
+  await sleep(1200)
+  await shot('pm2-cluster-expanded')
+
   await show('nginx', 2500)
   await shot('nginx')
 

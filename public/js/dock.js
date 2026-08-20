@@ -1,5 +1,6 @@
 import { el, clear, toast } from './ui.js'
 import { api } from './api.js'
+import { LogView } from './logview.js'
 
 const THEME = {
   background: '#0a0e15', foreground: '#d7e0ee', cursor: '#4f9dff',
@@ -68,8 +69,14 @@ export class Dock {
     return { term, fit }
   }
 
-  /** Generic pane. `channel` decides what streams into it. */
-  open({ key, channel, title, actions = [] }) {
+  /**
+   * Generic pane. `channel` decides what streams into it.
+   *
+   * Log channels get two views of the same bytes: a terminal (raw, colours intact)
+   * and a parsed one with level/kind/instance filters. Both are fed every chunk, so
+   * flipping between them never loses backlog.
+   */
+  open({ key, channel, title, actions = [], structured = true }) {
     const existing = this.panes.get(key)
     if (existing) {
       this.activate(key)
@@ -78,15 +85,34 @@ export class Dock {
 
     const termHost = el('div', { class: 'term' })
     const header = el('div', { class: 'row small muted', style: 'padding:2px 4px 6px' })
-    const paneEl = el('div', { class: 'pane' }, header, termHost)
+    const logView = structured
+      ? new LogView({ onDownload: (text) => downloadText(`${key.replace(/[^\w.-]+/g, '-')}.log`, text) })
+      : null
+    const body = el('div', { class: 'panebody' }, termHost, logView ? logView.el : null)
+    const paneEl = el('div', { class: 'pane' }, header, body)
     this.panesEl.append(paneEl)
 
     const { term, fit } = this._makeTerm(termHost)
-    const pane = { key, channel, title, el: paneEl, term, fit, header, follow: true, unsub: null }
+    const pane = { key, channel, title, el: paneEl, term, fit, header, logView, mode: structured ? 'pretty' : 'raw', follow: true, unsub: null }
+
+    const applyMode = () => {
+      const pretty = pane.mode === 'pretty'
+      termHost.style.display = pretty ? 'none' : 'block'
+      if (logView) logView.el.style.display = pretty ? 'flex' : 'none'
+      if (!pretty) setTimeout(() => { try { fit.fit() } catch { /* hidden */ } }, 0)
+      if (modeBtn) {
+        modeBtn.textContent = pretty ? 'Raw' : 'Filtered'
+        modeBtn.title = pretty ? 'Switch to the raw terminal' : 'Switch to the filtered view'
+      }
+    }
+    const modeBtn = structured
+      ? el('button', { class: 'small', onclick: () => { pane.mode = pane.mode === 'pretty' ? 'raw' : 'pretty'; applyMode() } }, 'Raw')
+      : null
 
     header.append(
       el('span', { class: 'mono' }, title),
       el('div', { class: 'spacer' }),
+      modeBtn,
       ...actions.map((a) => el('button', {
         class: `small ${a.class || ''}`,
         onclick: () => a.onClick(pane),
@@ -102,16 +128,21 @@ export class Dock {
     pane.tab = tab
 
     pane.unsub = this.sock.subscribe(channel, (msg) => {
-      if (msg.type === 'snapshot' && msg.chunk) term.write(msg.chunk)
-      else if (msg.type === 'data' && msg.chunk) term.write(msg.chunk)
-      else if (msg.type === 'error') term.write(`\r\n\x1b[31m[panel] ${msg.error}\x1b[0m\r\n`)
-      else if (msg.type === 'end') {
+      if ((msg.type === 'snapshot' || msg.type === 'data') && msg.chunk) {
+        term.write(msg.chunk)
+        logView?.push(msg.chunk)
+      } else if (msg.type === 'error') {
+        term.write(`\r\n\x1b[31m[panel] ${msg.error}\x1b[0m\r\n`)
+        logView?.push(`[panel] ${msg.error}\n`)
+      }
+      if (msg.type === 'end') {
         const status = msg.job?.status || 'ended'
         tab.querySelector('span').textContent = `${title} · ${status}`
       }
       if (pane.follow) term.scrollToBottom()
     })
 
+    applyMode()
     this.panes.set(key, pane)
     this.root.classList.add('open')
     this.activate(key)
@@ -123,6 +154,8 @@ export class Dock {
       key: `job:${job.id}`,
       channel: `job:${job.id}`,
       title: job.title || `job ${job.id}`,
+      // Build output is meant to be read as a terminal, not as filterable records.
+      structured: false,
       actions: [
         {
           label: 'Cancel',
@@ -176,4 +209,14 @@ export class Dock {
       }
     }
   }
+}
+
+/** Client-side file save: the log the user is looking at, filters applied. */
+function downloadText(filename, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }

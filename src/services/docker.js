@@ -257,6 +257,11 @@ export class DockerService {
 
   /** argv for a follow-the-logs stream; the websocket layer spawns it. */
   logsArgv(name, tail = 200) {
+    if (!/^[\w.\-]+$/.test(String(name))) {
+      const err = new Error(`Refusing an odd container name: ${name}`)
+      err.status = 400
+      throw err
+    }
     return { cmd: this.bin, args: ['logs', '--tail', String(tail), '--timestamps', '-f', name] }
   }
 }

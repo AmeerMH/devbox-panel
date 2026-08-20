@@ -126,9 +126,20 @@ export class Pm2Service {
     })
   }
 
-  /** argv for a follow stream. `pm2 logs --raw` merges stdout+stderr and survives rotation. */
-  logsArgv(name, lines = 200) {
-    return { cmd: this.bin, args: ['logs', name, '--raw', '--lines', String(lines)], env: this.env() }
+  /**
+   * argv for a follow stream. Deliberately NOT `--raw`: pm2's default output
+   * prefixes every line with `<instance>|<app> |`, which is the only way to tell
+   * which worker of a cluster produced a line once their streams are merged.
+   * Accepts an app name or a pm2 id, so a single instance can be followed too.
+   */
+  logsArgv(nameOrId, lines = 200) {
+    const target = String(nameOrId)
+    if (!/^[\w@.\-/]+$/.test(target)) {
+      const err = new Error(`Refusing an odd pm2 target: ${target}`)
+      err.status = 400
+      throw err
+    }
+    return { cmd: this.bin, args: ['logs', target, '--lines', String(lines)], env: this.env() }
   }
 
   async describe(name) {

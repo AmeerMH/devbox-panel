@@ -16,17 +16,33 @@ case "${1:-}" in
 JSON
     ;;
   logs)
-    name=${2:-app}
-    echo "$name  GET /  200 in 41ms"
+    target=${2:-app}
+    # A realistic mix: pino JSON from the app, framework text, and a multi-line
+    # Prisma error — the shapes the structured viewer has to cope with.
+    echo "[TAILING] Tailing last 200 lines for [$target] process (change the value with --lines option)"
     i=0
     while true; do
       i=$((i+1))
-      for path in "/" "/products/42" "/api/cart" "/checkout"; do
-        echo "$name  GET $path 200 in $((20 + i % 90))ms"
-      done
+      inst=$((i % 2))
+      now=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+      echo "$inst|storefro | {\"level\":\"info\",\"time\":\"$now\",\"msg\":\"web-vital\",\"kind\":\"web-vital\",\"name\":\"LCP\",\"value\":$((900 + i * 7)),\"rating\":\"good\",\"url\":\"/products/demo-$i\"}"
+      echo "$inst|storefro | {\"level\":\"info\",\"time\":\"$now\",\"msg\":\"request\",\"kind\":\"http\",\"method\":\"GET\",\"url\":\"/orders\",\"status\":200,\"ms\":$((20 + i % 90))}"
+      if [ $((i % 4)) -eq 0 ]; then
+        echo "$inst|storefro | {\"level\":\"warn\",\"time\":\"$now\",\"msg\":\"slow query\",\"kind\":\"db\",\"ms\":$((900 + i)),\"query\":\"Order.findMany\"}"
+      fi
+      if [ $((i % 6)) -eq 0 ]; then
+        echo "$inst|storefro | prisma:error "
+        echo "$inst|storefro | Invalid \`prisma.store.findUnique()\` invocation:"
+        echo "$inst|storefro | "
+        echo "$inst|storefro | The column \`Store.translationReview\` does not exist in the current database."
+      fi
+      if [ $((i % 5)) -eq 0 ]; then
+        echo "$inst|storefro | {\"level\":\"info\",\"time\":\"$now\",\"msg\":\"web-vital\",\"kind\":\"web-vital\",\"name\":\"TTFB\",\"value\":$((120 + i * 3)),\"rating\":\"needs-improvement\",\"url\":\"/checkout\"}"
+      fi
       sleep 2
     done
     ;;
+
   restart|reload|stop|start|flush) echo "[PM2] applying action ${1} on app [${2:-app}]"; sleep 1; echo "[PM2] done" ;;
   describe) echo "describing ${2:-app} (demo stub)" ;;
   *) echo "pm2: demo stub" ;;

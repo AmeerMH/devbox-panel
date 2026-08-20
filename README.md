@@ -141,12 +141,49 @@ too, for every container — not just the databases.
 
 ![Docker containers](docs/screenshots/docker.png)
 
-### PM2
+### PM2 — a cluster is one row
 
 Status, mode, uptime, restart count, CPU, memory, port and working directory;
 reload (zero-downtime in cluster mode), restart, stop, start; live logs.
 
+A cluster app is collapsed into a single row carrying its totals — summed CPU and
+memory, the oldest instance's uptime, the combined restart count — because two rows
+that always get restarted together are just noise. The buttons act on the app, which
+is what `pm2 reload <name>` does anyway.
+
 ![PM2 processes](docs/screenshots/pm2.png)
+
+Expand it when a single worker is the problem: each instance gets its own row, its
+own numbers, and its own logs/restart/stop.
+
+![One cluster expanded into its workers](docs/screenshots/pm2-cluster-expanded.png)
+
+### Logs you can actually read
+
+Application logs are mostly machine-written now. A raw terminal shows four hundred
+identical `web-vital` lines and buries the two Prisma errors somewhere in the middle.
+Every log stream therefore has a second view: the same bytes, parsed into rows.
+
+![Structured log view](docs/screenshots/logs-structured.png)
+
+- **Filter by level** — `error`, `warn`, `info`, each chip showing how many there are.
+- **Filter by kind** — the `kind`/`msg` field of your JSON logs becomes a chip:
+  `web-vital`, `http`, `db`, `prisma`. Ignore the vitals, keep the errors.
+- **Filter by cluster instance** — a merged cluster stream is tagged per worker
+  (`#0`, `#1`), so "is it always the same instance?" is one click.
+- **Free-text filter** across the message, the fields and the collapsed detail.
+- **Multi-line blocks stay together.** A Prisma error or a stack trace is one row
+  that expands, not eight rows of orphaned text — and while worker #0 prints a
+  trace, worker #1's interleaved lines do not get swallowed into it.
+- Follow/pause, clear, and a download of exactly what the filter is showing.
+- The raw terminal is still one click away, colours intact.
+
+![Filtered down to the errors](docs/screenshots/logs-filtered.png)
+
+It understands pino/bunyan JSON (string or numeric levels), pm2's `0|app |` prefixes,
+docker's `--timestamps`, nginx access and error lines, `prisma:error` blocks, stack
+traces, and plain framework output. Anything it cannot classify is shown as-is rather
+than dropped.
 
 ### Nginx
 
@@ -296,6 +333,8 @@ src/
   services/dbdrivers/  one module per engine: postgres, mysql, redis, mongodb
   util/exec.js         argv-only spawn helpers, sudo hop, login shell
 public/                vanilla ES modules + xterm.js served from node_modules
+  js/logparse.js       log line parsing — DOM-free, so node tests it directly
+  js/logview.js        the filtered log table built on top of it
 demo/                  fake CLIs, fixtures, screenshot driver
 deploy/                nginx helper, sudoers, vhost templates, pm2 ecosystem, installer
 ```
@@ -316,6 +355,7 @@ from `node_modules`, so there is nothing to build or bundle.
 | Nginx tab: "sudo refused" | `/etc/sudoers.d/devbox-panel` missing or names a different user. Re-run `deploy/install.sh --user <user>`. |
 | PM2 tab: "pm2 not found" | pm2 is not on the panel's PATH (a login shell does not read `~/.bashrc` non-interactively). Set `pm2.bin` to the full path. |
 | PM2 list is empty but apps are running | The daemon belongs to another user. Run the panel as that user, or set `pm2.home`. |
+| Log rows say `~12:04:31` | That line carried no timestamp of its own (pm2 prefixes and Prisma blocks do not), so the panel shows when it received it. |
 | Logs stall or arrive in bursts | nginx buffering: the vhost needs `proxy_buffering off`, and `proxy_cache off` if a cache is enabled at the http level. |
 | Websocket never connects (page loads, dot is red) | The vhost is missing the `Upgrade`/`Connection` headers, or `$connection_upgrade` is undefined. The template shows the `map` to add. |
 | `make deploy` works over SSH but fails here | The recipe depends on an interactive-shell PATH. The panel prepends `~/.npm-global/bin` and `/usr/local/bin`; anything else belongs in the Makefile. |
@@ -331,9 +371,10 @@ from `node_modules`, so there is nothing to build or bundle.
 npm test
 ```
 
-Covers the Makefile parser, the nginx vhost parser, password/session/CSRF/rate-limit
-logic, the resource-limit parser (including the values it must refuse), the database
-drivers (image/unit matching, per-kind setting validation, and that each driver
+Covers the Makefile parser, the nginx vhost parser, the log parser (real pino/Prisma/
+pm2/nginx lines, multi-line grouping, interleaved cluster output, partial chunks,
+filters and facets), password/session/CSRF/rate-limit logic, the resource-limit parser
+(including the values it must refuse), the database drivers (image/unit matching, per-kind setting validation, and that each driver
 re-serialises what it was given rather than passing it through), and the job manager:
 exit codes, process-group cancellation, the concurrency cap, history trimming, and how
 a restart reports jobs it left running.
