@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 
 /**
  * Channel pub/sub shared by the HTTP layer and the websocket layer.
- * Channels are strings like `job:abc123`, `pm2`, `docker:logs:zad-db`.
+ * Channels are strings like `job:abc123`, `pm2`, `dockerlogs:api-db`.
  */
 class Bus extends EventEmitter {
   publish(channel, message) {
