@@ -33,6 +33,7 @@ async function boot() {
   } catch (err) {
     // A blank page is the worst possible failure mode for a control panel: say
     // what broke and offer the one action that fixes most of it.
+    window.__panelBootError = err?.message || String(err)
     clear(document.getElementById('view')).append(
       el('div', { class: 'card' },
         el('h2', {}, 'The panel failed to start'),
@@ -42,6 +43,9 @@ async function boot() {
     )
   } finally {
     window.__panelBooted = true
+    // The watchdog may have fired while a slow first load was still in flight.
+    const overlay = document.getElementById('boot-error')
+    if (overlay && !window.__panelBootError) overlay.style.display = 'none'
   }
 }
 

@@ -25,18 +25,50 @@
 <div id="boot-error">
   <div class="boot-box">
     <h2>The panel did not finish loading</h2>
-    <p>Its scripts could not be fetched — usually because the panel restarted while
-       this page was opening, or the connection dropped.</p>
-    <button onclick="location.reload()">Reload</button>
+    <p id="boot-reason">Checking what went wrong…</p>
+    <pre id="boot-diagnostics"></pre>
+    <div class="boot-actions">
+      <button onclick="location.reload()">Reload</button>
+      <button onclick="fetch('/api/logout',{method:'POST'}).finally(function(){location.href='/login'})">Sign out and back in</button>
+    </div>
   </div>
 </div>
 <script>
-  // app.js sets this once it has rendered. Deliberately inline: it has to work even
-  // when no module loaded at all.
+  // Deliberately inline and dependency-free: this has to work when no module
+  // loaded at all, which is exactly the case it exists for.
   window.__panelBooted = false
+  window.__panelBootError = null
+
+  function panelDiagnose() {
+    var box = document.getElementById('boot-diagnostics')
+    var reason = document.getElementById('boot-reason')
+    var lines = []
+    var checks = [
+      ['session  /api/me', '/api/me'],
+      ['scripts  /js/app.js', '/js/app.js'],
+      ['server   /healthz', '/healthz'],
+    ]
+    reason.textContent = window.__panelBootError
+      ? 'It started, then failed: ' + window.__panelBootError
+      : 'Its scripts loaded but nothing rendered, or a request never came back. Checks:'
+
+    lines.push('online: ' + navigator.onLine)
+    box.textContent = lines.join('\n')
+
+    checks.forEach(function (check) {
+      var started = Date.now()
+      fetch(check[1], { cache: 'no-store' })
+        .then(function (res) { lines.push(check[0] + ' -> ' + res.status + ' in ' + (Date.now() - started) + 'ms') })
+        .catch(function (err) { lines.push(check[0] + ' -> FAILED ' + err.message) })
+        .finally(function () { box.textContent = lines.join('\n') })
+    })
+  }
+
   setTimeout(function () {
-    if (!window.__panelBooted) document.getElementById('boot-error').style.display = 'flex'
-  }, 6000)
+    if (window.__panelBooted) return
+    document.getElementById('boot-error').style.display = 'flex'
+    panelDiagnose()
+  }, 12000)
 </script>
 <script src="/vendor/xterm.js"></script>
 <script src="/vendor/addon-fit.js"></script>
