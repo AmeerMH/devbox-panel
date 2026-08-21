@@ -334,3 +334,18 @@ test('grouping composes with filtering: group what is shown, not everything', ()
   assert.equal(errorsOnly.length, 1, 'boom 1 and boom 2 differ only by a number')
   assert.equal(errorsOnly[0].count, 2)
 })
+
+test('a stub message with the real text in a field is completed, so grouping splits properly', () => {
+  const a = parseLine('{"level":"error","kind":"error","msg":"server error: ","message":"Cannot read properties of undefined (reading id)"}')
+  const b = parseLine('{"level":"error","kind":"error","msg":"server error: ","message":"Prisma connection pool timed out"}')
+
+  assert.match(a.msg, /server error: Cannot read properties/)
+  assert.equal(a.fields.message, undefined, 'the merged field is not shown twice')
+  assert.notEqual(fingerprint(a), fingerprint(b), 'two different failures stay two groups')
+
+  const nested = parseLine('{"level":"error","msg":"failed:","err":{"message":"socket hang up"}}')
+  assert.match(nested.msg, /failed: socket hang up/)
+
+  const intact = parseLine('{"level":"info","kind":"http","msg":"request","message":"ignored"}')
+  assert.equal(intact.msg, 'request', 'a complete message is left alone')
+})

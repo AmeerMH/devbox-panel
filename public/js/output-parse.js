@@ -171,6 +171,23 @@ export function parseLine(rawLine) {
       entry.level = levelName(level)
       entry.time = toTime(time) ?? entry.time
       entry.msg = String(msg ?? message ?? '')
+
+      // Loggers routinely emit a stub message with the real text in a field —
+      // `{"msg":"server error: ","message":"…"}`. Left alone, every one of those
+      // groups together under the stub, which is exactly the noise grouping is
+      // supposed to remove.
+      if (!entry.msg || /[:\-]\s*$/.test(entry.msg)) {
+        // `message` is destructured above, so it is not in `rest` — check both.
+        const sources = [['message', message], ['error', rest.error], ['err', rest.err], ['reason', rest.reason], ['detail', rest.detail]]
+        for (const [key, value] of sources) {
+          const text = typeof value === 'string' ? value : typeof value?.message === 'string' ? value.message : null
+          if (!text || text === entry.msg) continue
+          entry.msg = `${entry.msg.trimEnd()} ${text}`.trim()
+          if (key !== 'message') delete rest[key]
+          break
+        }
+      }
+
       // The `kind` field is meant for grouping; falling back to `msg` only works
       // when the message is short and stable. A paragraph would become a chip.
       const derived = String(kind ?? msg ?? message ?? 'json')
