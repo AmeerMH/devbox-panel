@@ -171,6 +171,10 @@ Every log stream therefore has a second view: the same bytes, parsed into rows.
   `web-vital`, `http`, `db`, `prisma`. Ignore the vitals, keep the errors.
 - **Filter by cluster instance** — a merged cluster stream is tagged per worker
   (`#0`, `#1`), so "is it always the same instance?" is one click.
+- **Errors only** — one button, because that is what you opened the logs for.
+- **Group repeats** — collapse the same failure into one row with a count, the
+  workers it hit and the span it covered. Three hundred copies of one bug become
+  one line that says `×300`.
 - **Free-text filter** across the message, the fields and the collapsed detail.
 - **Multi-line blocks stay together.** A Prisma error or a stack trace is one row
   that expands, not eight rows of orphaned text — and while worker #0 prints a
@@ -179,6 +183,13 @@ Every log stream therefore has a second view: the same bytes, parsed into rows.
 - The raw terminal is still one click away, colours intact.
 
 ![Filtered down to the errors](docs/screenshots/logs-filtered.png)
+
+Grouping fingerprints each line: ids, hashes, durations and counts are replaced by
+placeholders, while what identifies the failure is kept. Two chunk-load errors with
+different build hashes are one group; a missing `Store.translationReview` and a
+missing `PlatformSetting.aiEnrichMaxImages` stay two, because they are two bugs.
+
+![The same errors, grouped by fingerprint](docs/screenshots/logs-grouped.png)
 
 It understands pino/bunyan JSON (string or numeric levels), pm2's `0|app |` prefixes,
 docker's `--timestamps`, nginx access and error lines, `prisma:error` blocks, stack

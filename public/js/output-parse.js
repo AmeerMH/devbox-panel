@@ -378,3 +378,69 @@ export function facets(entries) {
   }
   return { levels, kinds, instances }
 }
+
+/* ------------------------------------------------------------- grouping */
+
+/**
+ * A stable fingerprint for "the same problem happening again".
+ *
+ * The volatile parts of a log line — ids, hashes, durations, counts, timestamps —
+ * are what make 300 copies of one bug look like 300 bugs. They get replaced by
+ * placeholders; everything that identifies the failure (the model, the column, the
+ * route shape, the message itself) is kept.
+ */
+export function normalizeMessage(text) {
+  return String(text || '')
+    .replace(/\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?\b/g, '<time>')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '<uuid>')
+    // cuid / nanoid / build-hash style: a long token mixing letters and digits,
+    // which no English word does. Twelve characters is short enough to catch a
+    // webpack chunk name (3fas1fb8ivkc7) and long enough to leave prose alone.
+    .replace(/\b(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{12,}\b/gi, '<id>')
+    .replace(/\b[0-9a-f]{8,}\b/gi, '<hash>')
+    .replace(/(:\/\/[^/\s]+)?(\/[^\s?]*)/g, (match) => match.replace(/\/\d+\b/g, '/<n>'))
+    .replace(/\b\d+(?:\.\d+)?(ms|s|kb|mb|gb|b)?\b/gi, '<n>')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+export function fingerprint(entry) {
+  const head = normalizeMessage(entry.msg || entry.fallback || entry.raw)
+  // The first line of a block is what distinguishes two errors that share a
+  // headline — `Store.translationReview` from `PlatformSetting.aiEnrichMaxImages`.
+  const detailHead = normalizeMessage(String(entry.detail || '').split('\n').find((l) => l.trim()) || '')
+  return `${entry.level}|${entry.kind}|${head}|${detailHead}`
+}
+
+/**
+ * Collapse repeats into one row each, most frequent first. Counts, the time span
+ * and which cluster instances were involved are what you actually want to see
+ * once the same failure has happened 300 times.
+ */
+export function groupEntries(entries) {
+  const groups = new Map()
+  for (const entry of entries) {
+    const key = fingerprint(entry)
+    let group = groups.get(key)
+    if (!group) {
+      group = {
+        key,
+        level: entry.level,
+        kind: entry.kind,
+        count: 0,
+        first: entry.time,
+        last: entry.time,
+        instances: new Set(),
+        sample: entry,
+      }
+      groups.set(key, group)
+    }
+    group.count += 1
+    group.last = entry.time ?? group.last
+    if (entry.time && (!group.first || entry.time < group.first)) group.first = entry.time
+    if (entry.instance !== null) group.instances.add(entry.instance)
+    // Keep the newest occurrence as the sample: its detail is the freshest.
+    group.sample = entry
+  }
+  return [...groups.values()].sort((a, b) => b.count - a.count || (b.last ?? 0) - (a.last ?? 0))
+}

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { LogStream, parseLine, isEntryStart, filterEntries, facets, looksIncompleteJson } from '../public/js/output-parse.js'
+import { LogStream, parseLine, isEntryStart, filterEntries, facets, looksIncompleteJson, fingerprint, groupEntries, normalizeMessage } from '../public/js/output-parse.js'
 
 // Verbatim from a real pm2 stream: pino JSON, a multi-line Prisma error, plain text.
 const SAMPLE = `{"level":"info","time":"2026-08-20T20:14:17.581Z","msg":"web-vital","kind":"web-vital","name":"TTFB","value":642.3999999910593,"rating":"good","url":"/offers"}
@@ -265,4 +265,72 @@ test('incomplete-json detection ignores braces inside strings', () => {
   assert.equal(looksIncompleteJson('{"msg":"opened'), true)
   assert.equal(looksIncompleteJson('plain text'), false)
   assert.equal(looksIncompleteJson('{"msg":"escaped quote \\\\" still open'), true)
+})
+
+test('fingerprints ignore the volatile parts of a message', () => {
+  const a = parseLine('{"level":"error","kind":"error","msg":"Failed to load chunk /_next/static/chunks/3fas1fb8ivkc7.js from module 964893"}')
+  const b = parseLine('{"level":"error","kind":"error","msg":"Failed to load chunk /_next/static/chunks/9zz7kk2mmqp1x.js from module 771002"}')
+  assert.equal(fingerprint(a), fingerprint(b), 'same bug, different chunk hash')
+
+  const c = parseLine('{"level":"info","kind":"http","msg":"GET /products/cmt0clf8e002ej6yyoevuooj6 200 in 41ms"}')
+  const d = parseLine('{"level":"info","kind":"http","msg":"GET /products/cmt9xyz1a004fk7zzpfwvppk7 200 in 380ms"}')
+  assert.equal(fingerprint(c), fingerprint(d), 'same route, different id and timing')
+})
+
+test('fingerprints keep what actually distinguishes two failures', () => {
+  const stream = new LogStream()
+  stream.push([
+    'prisma:error ',
+    'Invalid `prisma.store.findUnique()` invocation:',
+    'The column `Store.translationReview` does not exist in the current database.',
+    'prisma:error ',
+    'Invalid `prisma.platformSetting.findUnique()` invocation:',
+    'The column `PlatformSetting.aiEnrichMaxImages` does not exist in the current database.',
+    '',
+  ].join('\n'))
+
+  const [first, second] = stream.entries
+  assert.notEqual(fingerprint(first), fingerprint(second), 'different model and column = different problem')
+
+  const errorVsInfo = parseLine('{"level":"info","kind":"error","msg":"same words"}')
+  const asError = parseLine('{"level":"error","kind":"error","msg":"same words"}')
+  assert.notEqual(fingerprint(errorVsInfo), fingerprint(asError), 'level is part of the identity')
+})
+
+test('grouping counts repeats, spans their time range and lists the workers', () => {
+  const stream = new LogStream()
+  const line = (instance, chunk, at) =>
+    `${instance}|storefro | {"level":"error","kind":"error","time":"${at}","msg":"Failed to load chunk /_next/static/chunks/${chunk}.js from module 964893"}`
+  stream.push([
+    line(0, '3fas1fb8ivkc7', '2026-08-20T20:00:00.000Z'),
+    line(1, '9zz7kk2mmqp1x', '2026-08-20T20:00:05.000Z'),
+    line(0, 'aab2cc3dd4ee5', '2026-08-20T20:00:09.000Z'),
+    '{"level":"info","kind":"http","msg":"GET /orders 200 in 12ms"}',
+    '',
+  ].join('\n'))
+
+  const groups = groupEntries(stream.entries)
+  assert.equal(groups.length, 2, 'three copies of one error plus one request')
+  const [top] = groups
+  assert.equal(top.count, 3)
+  assert.equal(top.level, 'error')
+  assert.deepEqual([...top.instances].sort(), [0, 1])
+  assert.equal(new Date(top.first).toISOString(), '2026-08-20T20:00:00.000Z')
+  assert.equal(new Date(top.last).toISOString(), '2026-08-20T20:00:09.000Z')
+  assert.equal(groups[1].count, 1)
+})
+
+test('grouping composes with filtering: group what is shown, not everything', () => {
+  const stream = new LogStream()
+  stream.push([
+    '{"level":"error","kind":"error","msg":"boom 1"}',
+    '{"level":"error","kind":"error","msg":"boom 2"}',
+    '{"level":"info","kind":"web-vital","msg":"web-vital","name":"LCP"}',
+    '{"level":"info","kind":"web-vital","msg":"web-vital","name":"TTFB"}',
+    '',
+  ].join('\n'))
+
+  const errorsOnly = groupEntries(filterEntries(stream.entries, { levels: new Set(['error']) }))
+  assert.equal(errorsOnly.length, 1, 'boom 1 and boom 2 differ only by a number')
+  assert.equal(errorsOnly[0].count, 2)
 })

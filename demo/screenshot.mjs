@@ -243,6 +243,15 @@ async function main() {
   await sleep(1200)
   await shot('logs-filtered')
 
+  // Same errors, collapsed by fingerprint: one row per distinct problem.
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll('.logtoolbar button')].find((b) => b.textContent === 'Group repeats')
+    if (btn) btn.click()
+    return true
+  })()`)
+  await sleep(1500)
+  await shot('logs-grouped')
+
   // Expanded cluster: the two workers behind the grouped row.
   await evaluate(`(() => {
     document.querySelectorAll('#dock .tab .x').forEach((x) => x.click())

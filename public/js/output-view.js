@@ -1,5 +1,5 @@
 import { el, clear, fmtDuration } from './ui.js'
-import { LogStream, filterEntries, facets, LEVELS } from './output-parse.js'
+import { LogStream, filterEntries, facets, groupEntries, LEVELS } from './output-parse.js'
 
 const LEVEL_ORDER = ['error', 'warn', 'info', 'debug', 'trace', 'fatal', 'other']
 const MAX_ROWS = 1500
@@ -24,6 +24,7 @@ export class LogView {
     this.stream = new LogStream({ limit: 5000 })
     this.filters = { levels: new Set(), kinds: new Set(), instances: new Set(), text: '' }
     this.follow = true
+    this.grouped = false
     this.onDownload = onDownload
 
     this.rows = el('div', { class: 'logrows' })
@@ -42,6 +43,27 @@ export class LogView {
       },
     })
 
+    // Two shortcuts for the question people actually open logs with: what is
+    // failing, and how often is it the same thing failing again.
+    this.errorsBtn = el('button', {
+      class: 'small',
+      title: 'Show only errors',
+      onclick: () => {
+        const onlyErrors = this.filters.levels.has('error') && this.filters.levels.size <= 2
+        this.filters.levels = onlyErrors ? new Set() : new Set(['error', 'fatal'])
+        this.rerender()
+      },
+    }, 'Errors only')
+
+    this.groupBtn = el('button', {
+      class: 'small',
+      title: 'Collapse repeats of the same message into one row with a count',
+      onclick: () => {
+        this.grouped = !this.grouped
+        this.rerender()
+      },
+    }, 'Group repeats')
+
     this.followBtn = el('button', {
       class: 'small primary',
       onclick: () => {
@@ -59,6 +81,8 @@ export class LogView {
         this.levelBar,
         this.kindBar,
         el('div', { class: 'row', style: 'flex:1 1 220px; min-width:180px' }, this.search),
+        this.errorsBtn,
+        this.groupBtn,
         this.followBtn,
         el('button', { class: 'small', onclick: () => { this.stream.clear(); this.rerender() } }, 'Clear'),
         this.onDownload ? el('button', { class: 'small', onclick: () => this.onDownload(this.visibleText()) }, 'Download') : null,
@@ -76,6 +100,19 @@ export class LogView {
     const added = this.stream.push(chunk)
     if (!added.length) return
 
+    if (this.grouped) {
+      // Counts change with every line; redoing the whole list per chunk would
+      // thrash, so coalesce into one repaint every half second.
+      if (!this._groupTimer) {
+        this._groupTimer = setTimeout(() => {
+          this._groupTimer = null
+          this.rerender()
+        }, 500)
+      }
+      this.renderFilters()
+      return
+    }
+
     const visible = filterEntries(added, this.filters)
     for (const entry of visible) this.rows.append(this.row(entry))
     this.trimRows()
@@ -85,13 +122,23 @@ export class LogView {
   }
 
   rerender() {
-    const visible = filterEntries(this.stream.entries, this.filters).slice(-MAX_ROWS)
+    const matching = filterEntries(this.stream.entries, this.filters)
     const fragment = document.createDocumentFragment()
-    for (const entry of visible) fragment.append(this.row(entry))
+
+    if (this.grouped) {
+      this.groups = groupEntries(matching)
+      for (const group of this.groups.slice(0, MAX_ROWS)) fragment.append(this.groupRow(group))
+    } else {
+      this.groups = null
+      for (const entry of matching.slice(-MAX_ROWS)) fragment.append(this.row(entry))
+    }
+
     clear(this.rows).append(fragment)
+    this.rows.classList.toggle('grouped', this.grouped)
     this.renderFilters()
-    this.updateCount()
-    if (this.follow) this.scrollToEnd()
+    this.updateCount(matching.length)
+    // A grouped list is sorted by frequency, so following the tail is meaningless.
+    if (this.follow && !this.grouped) this.scrollToEnd()
   }
 
   trimRows() {
@@ -102,14 +149,24 @@ export class LogView {
     this.rows.scrollTop = this.rows.scrollHeight
   }
 
-  updateCount() {
+  updateCount(matching) {
     const total = this.stream.entries.length
-    const shown = this.rows.childElementCount
-    this.countLabel.textContent = shown === total ? `${total} lines` : `${shown} of ${total}`
+    const shown = matching ?? this.rows.childElementCount
+    this.errorsBtn.className = `small ${this.filters.levels.has('error') && this.filters.levels.size <= 2 ? 'primary' : ''}`
+    this.groupBtn.className = `small ${this.grouped ? 'primary' : ''}`
+    const groups = this.groups?.length ?? 0
+    this.countLabel.textContent = this.grouped
+      ? `${groups} ${groups === 1 ? 'group' : 'groups'} · ${shown} of ${total} lines`
+      : shown === total ? `${total} lines` : `${shown} of ${total}`
   }
 
   visibleText() {
-    return filterEntries(this.stream.entries, this.filters).map((e) => e.raw).join('\n')
+    const matching = filterEntries(this.stream.entries, this.filters)
+    if (!this.grouped) return matching.map((e) => e.raw).join('\n')
+    // Grouped download: the summary you are looking at, one line per problem.
+    return groupEntries(matching)
+      .map((g) => `${String(g.count).padStart(5)} × [${g.level}] ${g.sample.msg || g.sample.fallback || g.sample.raw}`)
+      .join('\n')
   }
 
   /* --------------------------------------------------------------- filters */
@@ -165,6 +222,36 @@ export class LogView {
   }
 
   /* ------------------------------------------------------------------ rows */
+
+  /** One row per distinct problem: how many, over what span, from which workers. */
+  groupRow(group) {
+    const entry = group.sample
+    const span = group.first && group.last && group.last > group.first
+      ? `over ${fmtDuration(group.last - group.first)}`
+      : 'once'
+
+    const detail = el('pre', { class: 'logdetail' },
+      [
+        `last seen: ${group.last ? new Date(group.last).toLocaleTimeString() : 'unknown'}`,
+        group.first && group.first !== group.last ? `first seen: ${new Date(group.first).toLocaleTimeString()}` : null,
+        entry.detail,
+        Object.keys(entry.fields || {}).length ? JSON.stringify(entry.fields, null, 2) : '',
+        `raw: ${entry.raw}`,
+      ].filter(Boolean).join('\n\n'))
+    detail.style.display = 'none'
+
+    const row = el('div', { class: `logrow lvl-${entry.level} expandable` },
+      el('span', { class: `logcount lvl-${entry.level}` }, `×${group.count}`),
+      el('span', { class: `logbadge lvl-${entry.level}` }, entry.level),
+      ...[...group.instances].sort().map((i) => el('span', { class: 'logbadge inst' }, `#${i}`)),
+      el('span', { class: 'logmsg' }, entry.msg || entry.fallback || entry.raw),
+      el('span', { class: 'logfield' }, el('i', {}, group.count > 1 ? 'seen' : ''), span),
+    )
+    row.addEventListener('click', () => {
+      detail.style.display = detail.style.display === 'none' ? 'block' : 'none'
+    })
+    return el('div', { class: 'logentry' }, row, detail)
+  }
 
   row(entry) {
     const time = entry.time ? new Date(entry.time) : null
