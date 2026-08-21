@@ -83,6 +83,11 @@ app.use(express.static(pub, {
 
 app.use('/api', createApiRouter({ cfg, jobs, projects, docker, pm2, nginx, system, databases, limiter }))
 
+// A missing asset must 404, not fall through to the SPA catch-all: an import that
+// receives index.html fails with an opaque MIME error instead of a plain 404, and a
+// renamed module would silently look fine to curl.
+app.use(['/js', '/css', '/vendor'], (req, res) => res.status(404).type('text/plain').send('Not found\n'))
+
 app.get('/login', (req, res) => res.sendFile(path.join(pub, 'login.html')))
 app.get('/healthz', (req, res) => res.type('text/plain').send('ok\n'))
 app.get('*', (req, res) => res.sendFile(path.join(pub, 'index.html')))
