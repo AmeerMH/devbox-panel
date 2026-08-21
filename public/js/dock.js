@@ -1,6 +1,6 @@
 import { el, clear, toast } from './ui.js'
 import { api } from './api.js'
-import { LogView } from './logview.js'
+import { LogView } from './output-view.js'
 
 const THEME = {
   background: '#0a0e15', foreground: '#d7e0ee', cursor: '#4f9dff',

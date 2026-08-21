@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { LogStream, parseLine, isEntryStart, filterEntries, facets, looksIncompleteJson } from '../public/js/logparse.js'
+import { LogStream, parseLine, isEntryStart, filterEntries, facets, looksIncompleteJson } from '../public/js/output-parse.js'
 
 // Verbatim from a real pm2 stream: pino JSON, a multi-line Prisma error, plain text.
 const SAMPLE = `{"level":"info","time":"2026-08-20T20:14:17.581Z","msg":"web-vital","kind":"web-vital","name":"TTFB","value":642.3999999910593,"rating":"good","url":"/offers"}

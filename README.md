@@ -333,8 +333,8 @@ src/
   services/dbdrivers/  one module per engine: postgres, mysql, redis, mongodb
   util/exec.js         argv-only spawn helpers, sudo hop, login shell
 public/                vanilla ES modules + xterm.js served from node_modules
-  js/logparse.js       log line parsing — DOM-free, so node tests it directly
-  js/logview.js        the filtered log table built on top of it
+  js/output-parse.js   log line parsing — DOM-free, so node tests it directly
+  js/output-view.js    the filtered log table built on top of it
 demo/                  fake CLIs, fixtures, screenshot driver
 deploy/                nginx helper, sudoers, vhost templates, pm2 ecosystem, installer
 ```
@@ -355,6 +355,7 @@ from `node_modules`, so there is nothing to build or bundle.
 | Nginx tab: "sudo refused" | `/etc/sudoers.d/devbox-panel` missing or names a different user. Re-run `deploy/install.sh --user <user>`. |
 | PM2 tab: "pm2 not found" | pm2 is not on the panel's PATH (a login shell does not read `~/.bashrc` non-interactively). Set `pm2.bin` to the full path. |
 | PM2 list is empty but apps are running | The daemon belongs to another user. Run the panel as that user, or set `pm2.home`. |
+| The panel shows "did not finish loading" but the server is fine | A content blocker refused one of its scripts (`ERR_BLOCKED_BY_CLIENT`). The overlay's checks name the file. Asset names here deliberately avoid words like log/track/analytics/ad for this reason — if you add one, keep to that rule. |
 | Log rows say `~12:04:31` | That line carried no timestamp of its own (pm2 prefixes and Prisma blocks do not), so the panel shows when it received it. |
 | Logs stall or arrive in bursts | nginx buffering: the vhost needs `proxy_buffering off`, and `proxy_cache off` if a cache is enabled at the http level. |
 | Websocket never connects (page loads, dot is red) | The vhost is missing the `Upgrade`/`Connection` headers, or `$connection_upgrade` is undefined. The template shows the `map` to add. |

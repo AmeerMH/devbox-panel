@@ -1,10 +1,16 @@
 import { el, clear, fmtDuration } from './ui.js'
-import { LogStream, filterEntries, facets, LEVELS } from './logparse.js'
+import { LogStream, filterEntries, facets, LEVELS } from './output-parse.js'
 
 const LEVEL_ORDER = ['error', 'warn', 'info', 'debug', 'trace', 'fatal', 'other']
 const MAX_ROWS = 1500
 
 /**
+ * NOTE ON THE FILE NAME: this used to be `logview.js` / `logparse.js`, and content
+ * blockers matched those against their tracker filter lists — the browser refused
+ * the request with ERR_BLOCKED_BY_CLIENT and the whole panel failed to boot for
+ * anyone running uBlock or similar. Keep asset names free of words like log,
+ * track, analytics, collect, ad or stat.
+ *
  * The structured half of a log pane: the same stream the terminal shows, parsed
  * into rows that can be filtered by level, kind and cluster instance.
  *

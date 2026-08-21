@@ -43,10 +43,18 @@
     var box = document.getElementById('boot-diagnostics')
     var reason = document.getElementById('boot-reason')
     var lines = []
+    var blocked = false
+    // Every module is probed, not just the entry point: a content blocker refuses
+    // one file (ERR_BLOCKED_BY_CLIENT) and the rest load fine, which looks like
+    // nothing at all is wrong until you see which single request failed.
     var checks = [
-      ['session  /api/me', '/api/me'],
-      ['scripts  /js/app.js', '/js/app.js'],
-      ['server   /healthz', '/healthz'],
+      ['session   /api/me', '/api/me'],
+      ['server    /healthz', '/healthz'],
+      ['scripts   /js/app.js', '/js/app.js'],
+      ['scripts   /js/dock.js', '/js/dock.js'],
+      ['scripts   /js/output-view.js', '/js/output-view.js'],
+      ['scripts   /js/output-parse.js', '/js/output-parse.js'],
+      ['scripts   /js/views/pm2.js', '/js/views/pm2.js'],
     ]
     reason.textContent = window.__panelBootError
       ? 'It started, then failed: ' + window.__panelBootError
@@ -59,8 +67,15 @@
       var started = Date.now()
       fetch(check[1], { cache: 'no-store' })
         .then(function (res) { lines.push(check[0] + ' -> ' + res.status + ' in ' + (Date.now() - started) + 'ms') })
-        .catch(function (err) { lines.push(check[0] + ' -> FAILED ' + err.message) })
-        .finally(function () { box.textContent = lines.join('\n') })
+        .catch(function (err) {
+          lines.push(check[0] + ' -> BLOCKED OR UNREACHABLE (' + err.message + ')')
+          blocked = true
+        })
+        .finally(function () {
+          box.textContent = lines.join('\n') + (blocked
+            ? '\n\nA request was refused by the browser itself. That is almost always an\nad/tracker blocker matching the file name — allow this site in it, or\nopen the panel in a window with extensions disabled.'
+            : '')
+        })
     })
   }
 
