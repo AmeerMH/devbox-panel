@@ -461,3 +461,22 @@ export function groupEntries(entries) {
   }
   return [...groups.values()].sort((a, b) => b.count - a.count || (b.last ?? 0) - (a.last ?? 0))
 }
+
+/**
+ * One readable line for a message that may contain newlines.
+ *
+ * `{"msg":"server error: \nInvalid `prisma...` invocation:\n\nThe column ..."}`
+ * rendered by its first physical line says only "server error:" — the actual
+ * failure starts on line two. Blank lines collapse and the rest folds into one
+ * line; the full text stays available in the expanded detail.
+ */
+export function headline(text, max = 400) {
+  const flat = String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat
+}

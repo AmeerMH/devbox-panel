@@ -1,5 +1,5 @@
 import { el, clear, fmtDuration } from './ui.js'
-import { LogStream, filterEntries, facets, groupEntries, LEVELS } from './output-parse.js'
+import { LogStream, filterEntries, facets, groupEntries, headline, LEVELS } from './output-parse.js'
 
 const LEVEL_ORDER = ['error', 'warn', 'info', 'debug', 'trace', 'fatal', 'other']
 const MAX_ROWS = 1500
@@ -234,6 +234,7 @@ export class LogView {
       [
         `last seen: ${group.last ? new Date(group.last).toLocaleTimeString() : 'unknown'}`,
         group.first && group.first !== group.last ? `first seen: ${new Date(group.first).toLocaleTimeString()}` : null,
+        /\n/.test(entry.msg || '') ? entry.msg : null,
         entry.detail,
         Object.keys(entry.fields || {}).length ? JSON.stringify(entry.fields, null, 2) : '',
         `raw: ${entry.raw}`,
@@ -244,7 +245,7 @@ export class LogView {
       el('span', { class: `logcount lvl-${entry.level}` }, `×${group.count}`),
       el('span', { class: `logbadge lvl-${entry.level}` }, entry.level),
       ...[...group.instances].sort().map((i) => el('span', { class: 'logbadge inst' }, `#${i}`)),
-      el('span', { class: 'logmsg' }, entry.msg || entry.fallback || entry.raw),
+      el('span', { class: 'logmsg' }, headline(entry.msg || entry.fallback || entry.raw)),
       el('span', { class: 'logfield' }, el('i', {}, group.count > 1 ? 'seen' : ''), span),
     )
     row.addEventListener('click', () => {
@@ -268,7 +269,8 @@ export class LogView {
       if (fieldChips.length >= 6) break
     }
 
-    const expandable = !!entry.detail || Object.keys(entry.fields || {}).length > fieldChips.length
+    const multiline = /\n/.test(entry.msg || '')
+    const expandable = multiline || !!entry.detail || Object.keys(entry.fields || {}).length > fieldChips.length
     const row = el('div', { class: `logrow lvl-${entry.level}${expandable ? ' expandable' : ''}` },
       el('span', {
         class: 'logtime',
@@ -276,14 +278,17 @@ export class LogView {
       }, entry.timeSource === 'received' ? `~${stamp}` : stamp),
       el('span', { class: `logbadge lvl-${entry.level}` }, entry.level),
       entry.instance !== null ? el('span', { class: 'logbadge inst' }, `#${entry.instance}`) : null,
-      el('span', { class: 'logmsg' }, entry.msg || entry.fallback || entry.raw),
+      el('span', { class: 'logmsg' }, headline(entry.msg || entry.fallback || entry.raw)),
       ...fieldChips,
     )
 
     if (expandable) {
       const detail = el('pre', { class: 'logdetail' },
-        [entry.detail, Object.keys(entry.fields || {}).length ? JSON.stringify(entry.fields, null, 2) : '']
-          .filter(Boolean).join('\n\n'))
+        [
+          multiline ? entry.msg : '',
+          entry.detail,
+          Object.keys(entry.fields || {}).length ? JSON.stringify(entry.fields, null, 2) : '',
+        ].filter(Boolean).join('\n\n'))
       detail.style.display = 'none'
       row.addEventListener('click', () => {
         detail.style.display = detail.style.display === 'none' ? 'block' : 'none'

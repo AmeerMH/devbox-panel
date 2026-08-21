@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { LogStream, parseLine, isEntryStart, filterEntries, facets, looksIncompleteJson, fingerprint, groupEntries, normalizeMessage } from '../public/js/output-parse.js'
+import { LogStream, parseLine, isEntryStart, filterEntries, facets, looksIncompleteJson, fingerprint, groupEntries, normalizeMessage, headline } from '../public/js/output-parse.js'
 
 // Verbatim from a real pm2 stream: pino JSON, a multi-line Prisma error, plain text.
 const SAMPLE = `{"level":"info","time":"2026-08-20T20:14:17.581Z","msg":"web-vital","kind":"web-vital","name":"TTFB","value":642.3999999910593,"rating":"good","url":"/offers"}
@@ -348,4 +348,19 @@ test('a stub message with the real text in a field is completed, so grouping spl
 
   const intact = parseLine('{"level":"info","kind":"http","msg":"request","message":"ignored"}')
   assert.equal(intact.msg, 'request', 'a complete message is left alone')
+})
+
+test('a message with embedded newlines gets a readable one-line headline', () => {
+  const entry = parseLine(JSON.stringify({
+    level: 'error',
+    msg: 'server error: \nInvalid `prisma.store.findUnique()` invocation:\n\n\nThe column `Store.translationReview` does not exist in the current database.',
+  }))
+
+  const line = headline(entry.msg)
+  assert.match(line, /^server error: Invalid `prisma\.store\.findUnique\(\)` invocation: The column/)
+  assert.ok(!line.includes('\n'), 'one line')
+  assert.ok(entry.msg.includes('\n'), 'the full text is untouched for the expanded view')
+
+  assert.equal(headline('x'.repeat(500)).length, 401, 'long messages are capped with an ellipsis')
+  assert.equal(headline(''), '')
 })
